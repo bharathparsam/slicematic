@@ -144,16 +144,22 @@ export default function AdminOrdersTable() {
   )
 }
 
-/** Short human summary of the combo, defensive against older/partial records. */
+/** Short human summary of an order's pizzas, defensive against partial records. */
 function summariseItems(o) {
+  // Current model: an order has an `items` array of combos.
+  if (Array.isArray(o.items) && o.items.length > 0) {
+    return o.items
+      .map((it) => {
+        const name = it.pizza?.name ?? '—'
+        return it.quantity > 1 ? `${name} ×${it.quantity}` : name
+      })
+      .join(', ')
+  }
+  // Backward-compat: older single-combo records.
   const parts = []
   if (o.base?.name) parts.push(o.base.name)
   if (o.pizza?.name) parts.push(o.pizza.name)
-  const base = parts.join(' · ')
-  const toppings = Array.isArray(o.toppings) ? o.toppings : []
-  const tops =
-    toppings.length > 0 ? ` + ${toppings.map((t) => t.name).join(', ')}` : ''
-  return base + tops || '—'
+  return parts.join(' · ') || '—'
 }
 
 function formatTime(iso) {

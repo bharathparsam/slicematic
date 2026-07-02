@@ -1,5 +1,5 @@
-1;Thin Crust;120
-2;Hand Tossed;150
-3;Cheese Burst;200
-4;Whole Wheat;160
-5;Multigrain;180
+B1;Thin Crust;149
+B2;Thick Crust;179
+B3;Cheese Burst;229
+B4;Whole Wheat;159
+B5;Multigrain;169

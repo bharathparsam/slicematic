@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { validateName, validatePhone, validateQuantity } from '../validators'
-import { unitPrice, subtotal, discount, gst, finalTotal, computeBill } from '../billing'
+import { unitPrice, subtotal, discount, gst, finalTotal, computeBill, computeOrderBill } from '../billing'
 import { parseMenuText } from '../menuLoader'
 
 describe('validateName', () => {
@@ -75,6 +75,41 @@ describe('billing', () => {
     expect(bill.discount).toBe(0)
     expect(bill.gst).toBe(162) // 18% of 900
     expect(bill.total).toBe(1062)
+  })
+})
+
+describe('computeOrderBill (multi-combo cart)', () => {
+  const base = { id: 'B1', price: 100 }
+  const pizza = { id: 'P1', price: 200 }
+
+  it('sums multiple line items', () => {
+    const order = computeOrderBill([
+      { base, pizza, toppings: [], quantity: 2 }, // unit 300, sub 600, gst 108, total 708
+      { base, pizza, toppings: [{ price: 50 }], quantity: 1 }, // unit 350, sub 350, gst 63, total 413
+    ])
+    expect(order.totalQuantity).toBe(3)
+    expect(order.subtotal).toBe(950)
+    expect(order.discount).toBe(0)
+    expect(order.gst).toBe(171) // 18% of 950
+    expect(order.total).toBe(1121)
+    expect(order.lines).toHaveLength(2)
+  })
+
+  it('applies discount per qualifying line only', () => {
+    const order = computeOrderBill([
+      { base, pizza, toppings: [], quantity: 5 }, // sub 1500, disc 150
+      { base, pizza, toppings: [], quantity: 2 }, // sub 600, disc 0
+    ])
+    expect(order.subtotal).toBe(2100)
+    expect(order.discount).toBe(150)
+    expect(order.gst).toBe(351) // 18% of (2100 - 150)
+    expect(order.total).toBe(2301)
+    expect(order.discountApplied).toBe(true)
+  })
+
+  it('empty cart yields zeroes', () => {
+    const order = computeOrderBill([])
+    expect(order).toMatchObject({ subtotal: 0, discount: 0, gst: 0, total: 0, totalQuantity: 0 })
   })
 })
 

@@ -1,6 +1,8 @@
-1;Margherita;180
-2;Farmhouse;260
-3;Peppy Paneer;280
-4;Veggie Supreme;300
-5;Tandoori Paneer;320
-6;Mexican Green Wave;290
+P1;Margherita;299
+P2;Chicago Deep Dish;349
+P3;Greek Mediterranean;329
+P4;California Veggie;339
+P5;Farm House;319
+P6;Pepperoni Classic;369
+P7;BBQ Chicken;379
+P8;Paneer Tikka;349

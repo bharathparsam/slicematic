@@ -7,7 +7,7 @@ import AdminOrdersTable from '@/components/AdminOrdersTable'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, Button } from '@/components/ui/primitives'
 import { loadAllMenus } from '@/lib/menuLoader'
 import { validateName, validatePhone, validateQuantity } from '@/lib/validators'
-import { computeBill, formatCurrency } from '@/lib/billing'
+import { computeBill, computeOrderBill, formatCurrency } from '@/lib/billing'
 import { saveOrder } from '@/lib/orderStore'
 
 export default function App() {
@@ -97,22 +97,28 @@ function OrderFlow() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // --- Form state -----------------------------------------------------
+  // --- Customer state -------------------------------------------------
   const [customer, setCustomer] = useState({ name: '', phone: '' })
   const [custErrors, setCustErrors] = useState({ name: '', phone: '' })
   const [touched, setTouched] = useState({ name: false, phone: false })
 
+  // --- Combo builder state --------------------------------------------
   const [selection, setSelection] = useState(EMPTY_SELECTION)
   const [selErrors, setSelErrors] = useState({ base: '', pizza: '', quantity: '' })
+  const [comboError, setComboError] = useState('')
 
+  // --- Cart (multiple combos per order) -------------------------------
+  const [cart, setCart] = useState([])
+  const lineCounter = useRef(0)
+
+  // --- Payment / submit -----------------------------------------------
   const [payment, setPayment] = useState('')
   const [paymentError, setPaymentError] = useState('')
-
   const [confirmed, setConfirmed] = useState(null)
   const submittingRef = useRef(false) // synchronous guard vs double-click
   const [submitting, setSubmitting] = useState(false)
 
-  // --- Derived data ---------------------------------------------------
+  // --- Derived: current builder combo ---------------------------------
   const base = useMemo(
     () => menu?.bases.find((b) => b.id === selection.baseId) || null,
     [menu, selection.baseId]
@@ -129,10 +135,14 @@ function OrderFlow() {
   const qtyCheck = validateQuantity(selection.quantity)
   const discountActive = qtyCheck.valid && Number(selection.quantity) >= 5
 
-  const bill = useMemo(() => {
+  // Live preview of the combo currently being built (before it's added).
+  const preview = useMemo(() => {
     if (!base || !pizza || !qtyCheck.valid) return null
     return computeBill(base, pizza, toppings, selection.quantity)
   }, [base, pizza, toppings, selection.quantity, qtyCheck.valid])
+
+  // Aggregate bill for everything in the cart.
+  const orderBill = useMemo(() => computeOrderBill(cart), [cart])
 
   // --- Customer handlers ----------------------------------------------
   function onCustChange(field, value) {
@@ -149,14 +159,16 @@ function OrderFlow() {
     setCustErrors((e) => ({ ...e, [field]: check.error }))
   }
 
-  // --- Selection handlers ---------------------------------------------
+  // --- Builder handlers -----------------------------------------------
   function onSelectBase(id) {
     setSelection((s) => ({ ...s, baseId: id }))
     setSelErrors((e) => ({ ...e, base: '' }))
+    setComboError('')
   }
   function onSelectPizza(id) {
     setSelection((s) => ({ ...s, pizzaId: id }))
     setSelErrors((e) => ({ ...e, pizza: '' }))
+    setComboError('')
   }
   function onToggleTopping(id) {
     setSelection((s) => ({
@@ -174,68 +186,92 @@ function OrderFlow() {
     setSelErrors((e) => ({ ...e, quantity: validateQuantity(selection.quantity).error }))
   }
 
-  // --- Confirm --------------------------------------------------------
-  function validateAll() {
-    const nameCheck = validateName(customer.name)
-    const phoneCheck = validatePhone(customer.phone)
+  // Validate the builder and, if OK, push the combo onto the cart.
+  function onAddCombo() {
     const quantityCheck = validateQuantity(selection.quantity)
     const baseErr = selection.baseId ? '' : 'Please select a base.'
     const pizzaErr = selection.pizzaId ? '' : 'Please select a pizza.'
+
+    setSelErrors({ base: baseErr, pizza: pizzaErr, quantity: quantityCheck.error })
+
+    if (baseErr || pizzaErr || !quantityCheck.valid) {
+      setComboError('Complete the combo above before adding it.')
+      const focusId = baseErr ? null : pizzaErr ? null : !quantityCheck.valid ? 'qty' : null
+      const el = focusId && document.getElementById(focusId)
+      if (el?.focus) el.focus()
+      return
+    }
+
+    const lineId = `L${++lineCounter.current}`
+    setCart((c) => [
+      ...c,
+      { lineId, base, pizza, toppings, quantity: Number(selection.quantity) },
+    ])
+    // Reset the builder for the next pizza.
+    setSelection(EMPTY_SELECTION)
+    setSelErrors({ base: '', pizza: '', quantity: '' })
+    setComboError('')
+  }
+
+  // --- Cart handlers --------------------------------------------------
+  function updateLineQty(lineId, nextQty) {
+    const clamped = Math.max(1, Math.min(10, nextQty))
+    setCart((c) =>
+      c.map((line) => (line.lineId === lineId ? { ...line, quantity: clamped } : line))
+    )
+  }
+  function removeLine(lineId) {
+    setCart((c) => c.filter((line) => line.lineId !== lineId))
+  }
+
+  // --- Confirm --------------------------------------------------------
+  function handleConfirm() {
+    if (submittingRef.current) return // synchronous double-click guard
+
+    const nameCheck = validateName(customer.name)
+    const phoneCheck = validatePhone(customer.phone)
+    const cartEmpty = cart.length === 0
     const payErr = payment ? '' : 'Please select a payment method.'
 
     setTouched({ name: true, phone: true })
     setCustErrors({ name: nameCheck.error, phone: phoneCheck.error })
-    setSelErrors({ base: baseErr, pizza: pizzaErr, quantity: quantityCheck.error })
     setPaymentError(payErr)
+    if (cartEmpty) setComboError('Add at least one pizza to the order.')
 
-    const firstInvalid =
-      (nameCheck.valid ? '' : 'cust-name') ||
-      (phoneCheck.valid ? '' : 'cust-phone') ||
-      (baseErr ? 'base-error' : '') ||
-      (pizzaErr ? 'pizza-error' : '') ||
-      (quantityCheck.valid ? '' : 'qty') ||
-      (payErr ? 'payment-error' : '')
-
-    const ok =
-      nameCheck.valid &&
-      phoneCheck.valid &&
-      quantityCheck.valid &&
-      !baseErr &&
-      !pizzaErr &&
-      !payErr
-    return { ok, firstInvalid }
-  }
-
-  function handleConfirm() {
-    // Synchronous double-click guard — runs before any state flush.
-    if (submittingRef.current) return
-
-    const { ok, firstInvalid } = validateAll()
+    const ok = nameCheck.valid && phoneCheck.valid && !cartEmpty && !payErr
     if (!ok) {
-      if (firstInvalid) {
-        const el = document.getElementById(firstInvalid)
-        if (el && el.focus) el.focus()
-        else el?.scrollIntoView({ behavior: 'smooth', block: 'center' })
-      }
+      const focusId =
+        (nameCheck.valid ? '' : 'cust-name') ||
+        (phoneCheck.valid ? '' : 'cust-phone')
+      const el = focusId && document.getElementById(focusId)
+      if (el?.focus) el.focus()
       return
     }
 
     submittingRef.current = true
     setSubmitting(true)
 
-    // Recompute the bill here so the saved record can never drift from the UI.
-    const finalBill = computeBill(base, pizza, toppings, selection.quantity)
+    // Recompute here so the saved record can never drift from the UI.
+    const finalBill = computeOrderBill(cart)
 
     const order = {
       timestamp: new Date().toISOString(),
       sessionStartedAt: sessionStartedAt.current,
       customerName: customer.name.trim(),
       phone: customer.phone.trim(),
-      base: { id: base.id, name: base.name, price: base.price },
-      pizza: { id: pizza.id, name: pizza.name, price: pizza.price },
-      toppings: toppings.map((t) => ({ id: t.id, name: t.name, price: t.price })),
-      quantity: finalBill.quantity,
-      unitPrice: finalBill.unit,
+      items: finalBill.lines.map((l) => ({
+        base: { id: l.base.id, name: l.base.name, price: l.base.price },
+        pizza: { id: l.pizza.id, name: l.pizza.name, price: l.pizza.price },
+        toppings: l.toppings.map((t) => ({ id: t.id, name: t.name, price: t.price })),
+        quantity: l.quantity,
+        unitPrice: l.unit,
+        lineSubtotal: l.subtotal,
+        lineDiscount: l.discount,
+        lineGst: l.gst,
+        lineTotal: l.total,
+      })),
+      itemCount: finalBill.lines.length,
+      quantity: finalBill.totalQuantity, // total pizzas across the order
       subtotal: finalBill.subtotal,
       discount: finalBill.discount,
       gst: finalBill.gst,
@@ -260,6 +296,8 @@ function OrderFlow() {
     setTouched({ name: false, phone: false })
     setSelection(EMPTY_SELECTION)
     setSelErrors({ base: '', pizza: '', quantity: '' })
+    setComboError('')
+    setCart([])
     setPayment('')
     setPaymentError('')
     setConfirmed(null)
@@ -282,7 +320,6 @@ function OrderFlow() {
       </StatusPanel>
     )
   }
-
   if (confirmed) {
     return <OrderConfirmed order={confirmed} onNew={startNewOrder} />
   }
@@ -306,12 +343,19 @@ function OrderFlow() {
           onQuantityChange={onQuantityChange}
           onQuantityBlur={onQuantityBlur}
           discountActive={discountActive}
+          onAddCombo={onAddCombo}
+          comboError={comboError}
+          preview={preview}
         />
       </div>
 
-      {/* Live bill + payment + confirm — sticky on desktop. */}
+      {/* Live cart + payment + confirm — sticky on desktop. */}
       <div className="space-y-6 lg:sticky lg:top-6 lg:self-start">
-        <OrderSummary base={base} pizza={pizza} toppings={toppings} bill={bill} />
+        <OrderSummary
+          order={orderBill}
+          onUpdateQty={updateLineQty}
+          onRemove={removeLine}
+        />
         <Card>
           <CardHeader>
             <CardTitle>4. Payment &amp; confirm</CardTitle>
@@ -332,8 +376,8 @@ function OrderFlow() {
             >
               {submitting
                 ? 'Saving…'
-                : bill
-                  ? `Confirm order · ${formatCurrency(bill.total)}`
+                : cart.length > 0
+                  ? `Confirm order · ${formatCurrency(orderBill.total)}`
                   : 'Confirm order'}
             </Button>
           </CardContent>
@@ -360,6 +404,7 @@ function StatusPanel({ title, tone = 'muted', children }) {
 }
 
 function OrderConfirmed({ order, onNew }) {
+  const itemCount = order.itemCount ?? order.items?.length ?? 0
   return (
     <Card className="mx-auto max-w-lg">
       <CardHeader>
@@ -378,7 +423,8 @@ function OrderConfirmed({ order, onNew }) {
             </span>
           </div>
           <p className="mt-1 text-xs text-muted-foreground">
-            {order.base?.name} · {order.pizza?.name} · qty {order.quantity}
+            {itemCount} pizza type{itemCount === 1 ? '' : 's'} · {order.quantity}{' '}
+            pizza{order.quantity === 1 ? '' : 's'} total
           </p>
         </div>
         <Button className="w-full" onClick={onNew}>

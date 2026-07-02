@@ -1,9 +1,10 @@
-import { Card, CardHeader, CardTitle, CardDescription, CardContent, Label, Input, FieldError } from '@/components/ui/primitives'
+import { Card, CardHeader, CardTitle, CardDescription, CardContent, Label, Input, FieldError, Button } from '@/components/ui/primitives'
 import { formatCurrency } from '@/lib/billing'
 
 /**
- * Step 2 — Menu selection. Base (single), Pizza (single), Toppings (multi),
- * Quantity (1–10). Every price shown comes straight from the parsed .txt data.
+ * Step 2 — Combo builder. Base (single), Pizza (single), Toppings (multi),
+ * Quantity (1–10). "Add to order" pushes this combo into the cart so several
+ * different pizzas can go on one order. Every price comes from the parsed .txt.
  */
 export default function MenuSelector({
   menu,
@@ -15,12 +16,18 @@ export default function MenuSelector({
   onQuantityChange,
   onQuantityBlur,
   discountActive,
+  onAddCombo,
+  comboError,
+  preview,
 }) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>2. Build the pizza</CardTitle>
-        <CardDescription>One base, one pizza, any toppings.</CardDescription>
+        <CardTitle>2. Build a pizza</CardTitle>
+        <CardDescription>
+          One base, one pizza, any toppings — then add it to the order. Repeat to
+          order several pizzas.
+        </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
         {/* Base — single select radio group */}
@@ -125,10 +132,36 @@ export default function MenuSelector({
               }
             >
               {discountActive
-                ? '🎉 10% bulk discount applied (5 or more).'
-                : 'Order 5 or more for a 10% discount.'}
+                ? '🎉 10% bulk discount applies to this combo (5 or more).'
+                : 'Order 5 or more of one combo for a 10% discount.'}
             </p>
           )}
+        </div>
+
+        {/* Add-to-order: live preview of this combo + the action button */}
+        <div className="flex flex-col gap-3 rounded-md border border-dashed border-input bg-muted/40 p-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="text-sm">
+            {preview ? (
+              <p className="text-muted-foreground">
+                This combo:{' '}
+                <span className="font-semibold text-foreground">
+                  {formatCurrency(preview.unit)}
+                </span>{' '}
+                × {preview.quantity} ={' '}
+                <span className="font-semibold text-foreground">
+                  {formatCurrency(preview.total)}
+                </span>
+              </p>
+            ) : (
+              <p className="text-muted-foreground">
+                Pick a base, pizza and quantity to add.
+              </p>
+            )}
+            <FieldError id="combo-error">{comboError}</FieldError>
+          </div>
+          <Button variant="outline" onClick={onAddCombo} className="shrink-0">
+            + Add to order
+          </Button>
         </div>
       </CardContent>
     </Card>

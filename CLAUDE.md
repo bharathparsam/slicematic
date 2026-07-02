@@ -67,9 +67,15 @@ src/
 
 ## Domain rules (do not silently change these)
 
-- **One combo per order, with a quantity** — one base, one pizza, zero+ toppings,
-  then a quantity (1–10). This is deliberately NOT a multi-item cart; discount and
-  quantity are per-order per the Stage 2 spec.
+- **Multi-combo order (cart).** An order = one customer + one-or-more combo line
+  items + one payment. Each combo = one base, one pizza, zero+ toppings, quantity
+  1–10. Customers build a combo and "Add to order", repeating for several pizzas.
+  (This extends the original one-combo spec at the client's request.)
+  - **Discount is evaluated per combo line** (a line gets 10% off when its own
+    quantity ≥ 5), not on cart-wide total quantity. Documented in
+    `billing.computeOrderBill`. Revisit if the spec later mandates cart-total.
+  - The saved order holds an `items[]` array; `quantity` on the record is the
+    total pizzas across all lines.
 - **Validation:** name = letters + spaces only, 2–40 chars; phone = exactly 10
   digits starting 6/7/8/9; quantity = integer 1–10.
 - **Billing math (in `billing.js`):**

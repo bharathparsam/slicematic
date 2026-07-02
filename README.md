@@ -1,9 +1,9 @@
 # 🍕 SliceMatic
 
 A React MVP replacing a Delhi pizza shop's Google Form ordering system. Customers
-build one pizza combo (base + pizza + toppings + quantity), see an itemised bill
-with bulk discount and GST, pick a payment method, and confirm. Staff review all
-orders in an Admin view.
+build one or more pizza combos (base + pizza + toppings + quantity), add each to
+the order, see an itemised bill with bulk discount and GST, pick a payment method,
+and confirm. Staff review all orders in an Admin view.
 
 **Stage 1 — front-end only.** No backend: state is in React and orders persist to
 `localStorage`. Supabase + an AI "COO" insights feature come in later stages.
