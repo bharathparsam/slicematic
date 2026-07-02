@@ -1,0 +1,8 @@
+node_modules
+dist
+.next
+*.local
+.DS_Store
+
+# Per-developer Claude Code settings (local overrides, not shared)
+.claude/settings.local.json

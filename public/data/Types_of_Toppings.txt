@@ -1,0 +1,8 @@
+1;Extra Cheese;60
+2;Mushroom;50
+3;Onion;30
+4;Capsicum;30
+5;Paneer;70
+6;Black Olives;55
+7;Jalapeno;45
+8;Sweet Corn;40

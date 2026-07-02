@@ -1,0 +1,6 @@
+1;Margherita;180
+2;Farmhouse;260
+3;Peppy Paneer;280
+4;Veggie Supreme;300
+5;Tandoori Paneer;320
+6;Mexican Green Wave;290
