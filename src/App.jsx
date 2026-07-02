@@ -6,6 +6,7 @@ import PaymentSelector from '@/components/PaymentSelector'
 import AdminOrdersTable from '@/components/AdminOrdersTable'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, Button } from '@/components/ui/primitives'
 import { loadAllMenus } from '@/lib/menuLoader'
+import { loadTaxConfig, DEFAULT_TAX_CONFIG } from '@/lib/taxConfig'
 import { validateName, validatePhone, validateQuantity } from '@/lib/validators'
 import { computeBill, computeOrderBill, formatCurrency } from '@/lib/billing'
 import { saveOrder } from '@/lib/orderStore'
@@ -72,6 +73,7 @@ const EMPTY_SELECTION = {
 function OrderFlow() {
   // --- Menu load state ------------------------------------------------
   const [menu, setMenu] = useState(null)
+  const [taxConfig, setTaxConfig] = useState(DEFAULT_TAX_CONFIG)
   const [loadError, setLoadError] = useState('')
   const [loading, setLoading] = useState(true)
 
@@ -82,8 +84,10 @@ function OrderFlow() {
     setLoading(true)
     setLoadError('')
     try {
-      const data = await loadAllMenus()
+      // Menu must load; tax config self-defaults if its file is missing/bad.
+      const [data, cfg] = await Promise.all([loadAllMenus(), loadTaxConfig()])
       setMenu(data)
+      setTaxConfig(cfg)
     } catch (err) {
       setMenu(null)
       setLoadError(err.message || 'Failed to load menu.')
@@ -138,11 +142,11 @@ function OrderFlow() {
   // Live preview of the combo currently being built (before it's added).
   const preview = useMemo(() => {
     if (!base || !pizza || !qtyCheck.valid) return null
-    return computeBill(base, pizza, toppings, selection.quantity)
-  }, [base, pizza, toppings, selection.quantity, qtyCheck.valid])
+    return computeBill(base, pizza, toppings, selection.quantity, taxConfig)
+  }, [base, pizza, toppings, selection.quantity, qtyCheck.valid, taxConfig])
 
   // Aggregate bill for everything in the cart.
-  const orderBill = useMemo(() => computeOrderBill(cart), [cart])
+  const orderBill = useMemo(() => computeOrderBill(cart, taxConfig), [cart, taxConfig])
 
   // --- Customer handlers ----------------------------------------------
   function onCustChange(field, value) {
@@ -252,7 +256,7 @@ function OrderFlow() {
     setSubmitting(true)
 
     // Recompute here so the saved record can never drift from the UI.
-    const finalBill = computeOrderBill(cart)
+    const finalBill = computeOrderBill(cart, taxConfig)
 
     const order = {
       timestamp: new Date().toISOString(),
@@ -275,6 +279,9 @@ function OrderFlow() {
       subtotal: finalBill.subtotal,
       discount: finalBill.discount,
       gst: finalBill.gst,
+      cgst: finalBill.cgst,
+      sgst: finalBill.sgst,
+      gstRate: taxConfig.gst.rate, // snapshot the rate that was applied
       total: finalBill.total,
       paymentMode: payment,
     }
@@ -353,6 +360,7 @@ function OrderFlow() {
       <div className="space-y-6 lg:sticky lg:top-6 lg:self-start">
         <OrderSummary
           order={orderBill}
+          taxConfig={taxConfig}
           onUpdateQty={updateLineQty}
           onRemove={removeLine}
         />

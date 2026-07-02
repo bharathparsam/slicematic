@@ -1,14 +1,18 @@
 import { Card, CardHeader, CardTitle, CardContent, Table, THead, TH, TR, TD } from '@/components/ui/primitives'
-import { formatCurrency, GST_RATE } from '@/lib/billing'
+import { formatCurrency } from '@/lib/billing'
+import { DEFAULT_TAX_CONFIG } from '@/lib/taxConfig'
+
+const pct = (r) => `${+(r * 100).toFixed(2)}%`
 
 /**
  * Step 3 — The order (cart). Lists every combo added, each with an inline
  * quantity stepper and a remove control, then the aggregate itemised bill.
  * `order` is the single source of truth from billing.computeOrderBill — the UI
- * never re-does the math here.
+ * never re-does the math here. GST labels/rates come from `taxConfig`.
  */
-export default function OrderSummary({ order, onUpdateQty, onRemove }) {
+export default function OrderSummary({ order, taxConfig = DEFAULT_TAX_CONFIG, onUpdateQty, onRemove }) {
   const hasItems = order && order.lines.length > 0
+  const { gst } = taxConfig
 
   return (
     <Card>
@@ -87,15 +91,13 @@ export default function OrderSummary({ order, onUpdateQty, onRemove }) {
                 />
                 {order.discountApplied && (
                   <LineRow
-                    label="Discount (10% on qualifying combos)"
+                    label={`Discount (${pct(taxConfig.discount.rate)} on qualifying combos)`}
                     value={-order.discount}
                     className="text-brand-dark"
                   />
                 )}
-                <LineRow
-                  label={`GST (${GST_RATE * 100}% on post-discount)`}
-                  value={order.gst}
-                />
+                <LineRow label={`CGST (${pct(gst.cgst)})`} value={order.cgst} />
+                <LineRow label={`SGST (${pct(gst.sgst)})`} value={order.sgst} />
                 <TR className="border-t-2 border-foreground/20">
                   <TD className="py-3 text-base font-bold">Total payable</TD>
                   <TD className="py-3 text-right text-lg font-extrabold tabular-nums text-brand-dark">
@@ -104,6 +106,10 @@ export default function OrderSummary({ order, onUpdateQty, onRemove }) {
                 </TR>
               </tbody>
             </Table>
+            <p className="text-xs text-muted-foreground">
+              {gst.label} {pct(gst.rate)} on the post-discount amount
+              {gst.inputTaxCredit ? '' : ' · no input tax credit'}.
+            </p>
           </>
         )}
       </CardContent>

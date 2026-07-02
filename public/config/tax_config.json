@@ -1,0 +1,16 @@
+{
+  "_note": "Billing config (GST + bulk discount). Loaded at runtime like the menu files, so rates can change without touching code. Edit and reload — no rebuild needed.",
+  "_source": "https://cleartax.in/s/impact-gst-food-services-restaurant-business",
+  "serviceType": "standalone_restaurant",
+  "gst": {
+    "label": "GST",
+    "rate": 0.05,
+    "cgst": 0.025,
+    "sgst": 0.025,
+    "inputTaxCredit": false
+  },
+  "discount": {
+    "rate": 0.1,
+    "minQuantity": 5
+  }
+}

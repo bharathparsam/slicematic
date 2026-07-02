@@ -42,8 +42,16 @@ on-screen error with Retry.
 - **Unit price** = base + pizza + all selected toppings
 - **Subtotal** = unit price × quantity
 - **Discount** = 10% of subtotal, only when quantity ≥ 5
-- **GST** = 18% of the **post-discount** amount (`subtotal − discount`)
+- **GST** = rate × the **post-discount** amount (`subtotal − discount`), shown split into CGST + SGST
 - **Total** = subtotal − discount + GST
+
+GST + discount rates are **not hardcoded** — they load at runtime from
+`public/config/tax_config.json` (same swappable pattern as the menu). SliceMatic
+is a standalone restaurant/takeaway, so the default is **5% GST (2.5% CGST +
+2.5% SGST), no input tax credit**
+([basis](https://cleartax.in/s/impact-gst-food-services-restaurant-business)). To
+model a hotel restaurant or delivery aggregator (18%), edit that file — no code
+change, no rebuild.
 
 ## Project structure
 

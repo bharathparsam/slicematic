@@ -48,6 +48,7 @@ src/
     validators.js   # validateName / validatePhone / validateQuantity → {valid, error}
     billing.js      # unitPrice → subtotal → discount → gst → finalTotal (all pure)
     orderStore.js   # localStorage seam. THE ONLY file that touches localStorage.
+    taxConfig.js    # loads GST + discount rates from /config/tax_config.json (defensive, self-defaulting)
     utils.js        # cn() classname helper
   components/
     CustomerIntakeForm · MenuSelector · OrderSummary · PaymentSelector · AdminOrdersTable
@@ -82,10 +83,18 @@ src/
   - `unitPrice` = base + pizza + all selected toppings
   - `subtotal` = unitPrice × quantity
   - `discount` = 10% of subtotal, **only when quantity ≥ 5**, else 0
-  - **`gst` = 18% of the POST-discount amount** = `0.18 × (subtotal − discount)`.
+  - **`gst` = GST rate × the POST-discount amount** = `rate × (subtotal − discount)`.
     This is the calculation reviewers ask about — GST is NOT on the raw subtotal.
+    `gstBreakdown` further splits it into CGST + SGST for the bill.
   - `finalTotal` = subtotal − discount + gst
   - All money is rounded to 2 dp via `round2`.
+- **GST rate is config-driven, not hardcoded** (`taxConfig.js` ← `public/config/tax_config.json`).
+  SliceMatic is a standalone restaurant/takeaway ⇒ **5% GST, no input tax credit,
+  split 2.5% CGST + 2.5% SGST** (per
+  https://cleartax.in/s/impact-gst-food-services-restaurant-business). A hotel
+  restaurant (room tariff ≥ ₹7,500) or e-commerce delivery would be 18% — change
+  the file, not the code. Billing functions take a `config` param and default to
+  `DEFAULT_TAX_CONFIG`; a missing/invalid config file self-defaults (non-fatal).
 - **Defensive menu parsing:** trim every field, skip blank lines, require exactly
   3 `;`-separated fields, price must parse as a finite positive number. Malformed
   lines are skipped with a `console.warn` — never crash. If a whole file fails

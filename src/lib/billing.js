@@ -1,10 +1,10 @@
 // billing.js
-// Pure money math for one combo order. No side effects, no DOM.
-// Every function is independently testable and safe to explain line-by-line.
+// Pure money math for an order. No side effects, no DOM. Rates are NOT hardcoded
+// here — they come from a tax config (see taxConfig.js), which is loaded from a
+// data file at runtime. Each function takes the config so it stays pure and
+// independently testable, and every function is safe to explain line-by-line.
 
-export const DISCOUNT_QTY_THRESHOLD = 5 // qty >= 5 earns the discount
-export const DISCOUNT_RATE = 0.1 // 10% off the subtotal
-export const GST_RATE = 0.18 // 18% GST
+import { DEFAULT_TAX_CONFIG } from './taxConfig'
 
 /** Round to 2 decimal places, avoiding binary float drift (e.g. 1.005). */
 export function round2(n) {
@@ -29,21 +29,40 @@ export function subtotal(unit, qty) {
   return round2(unit * qty)
 }
 
-/** Discount = 10% of subtotal, but only when qty >= 5. Otherwise 0. */
-export function discount(sub, qty) {
-  if (qty >= DISCOUNT_QTY_THRESHOLD) {
-    return round2(sub * DISCOUNT_RATE)
+/**
+ * Discount = discount.rate of subtotal, but only when qty >= discount.minQuantity.
+ * Otherwise 0. Rate + threshold come from config.
+ */
+export function discount(sub, qty, config = DEFAULT_TAX_CONFIG) {
+  const { rate, minQuantity } = config.discount
+  if (qty >= minQuantity) {
+    return round2(sub * rate)
   }
   return 0
 }
 
 /**
- * GST is charged on the POST-DISCOUNT amount: 18% of (subtotal − discount).
- * This is the function I expect to be asked to walk through.
+ * GST is charged on the POST-DISCOUNT amount: rate × (subtotal − discount).
+ * Rate comes from config (5% for a standalone restaurant, 18% for a hotel one).
+ * This is the function reviewers ask me to walk through.
  */
-export function gst(sub, disc) {
+export function gst(sub, disc, config = DEFAULT_TAX_CONFIG) {
   const taxable = sub - disc
-  return round2(taxable * GST_RATE)
+  return round2(taxable * config.gst.rate)
+}
+
+/**
+ * GST split into CGST + SGST for the itemised bill, the way a real Indian
+ * restaurant invoice shows it. CGST is rounded, then SGST is taken as
+ * (total − CGST) so the two halves always sum exactly to the GST total.
+ * @returns {{ total:number, cgst:number, sgst:number }}
+ */
+export function gstBreakdown(sub, disc, config = DEFAULT_TAX_CONFIG) {
+  const taxable = sub - disc
+  const total = round2(taxable * config.gst.rate)
+  const cgst = round2(taxable * config.gst.cgst)
+  const sgst = round2(total - cgst)
+  return { total, cgst, sgst }
 }
 
 /** Final payable = (subtotal − discount) + GST. */
@@ -52,16 +71,16 @@ export function finalTotal(sub, disc, tax) {
 }
 
 /**
- * Compute the whole bill in one place so the UI and the saved order record
- * never disagree. Returns every intermediate line for the itemised summary.
- * @returns {{unit, quantity, subtotal, discount, gst, total, discountApplied}}
+ * Compute one combo's bill in one place so the UI and the saved record never
+ * disagree. Returns every intermediate line for the itemised summary.
+ * @returns {{unit, quantity, subtotal, discount, gst, cgst, sgst, total, discountApplied}}
  */
-export function computeBill(base, pizza, toppings, quantity) {
+export function computeBill(base, pizza, toppings, quantity, config = DEFAULT_TAX_CONFIG) {
   const qty = Number(quantity)
   const unit = unitPrice(base, pizza, toppings)
   const sub = subtotal(unit, qty)
-  const disc = discount(sub, qty)
-  const tax = gst(sub, disc)
+  const disc = discount(sub, qty, config)
+  const { total: tax, cgst, sgst } = gstBreakdown(sub, disc, config)
   const total = finalTotal(sub, disc, tax)
   return {
     unit,
@@ -69,45 +88,51 @@ export function computeBill(base, pizza, toppings, quantity) {
     subtotal: sub,
     discount: disc,
     gst: tax,
+    cgst,
+    sgst,
     total,
     discountApplied: disc > 0,
   }
 }
 
 /**
- * Aggregate an order made of MULTIPLE combos (a cart).
- * Each entry is { base, pizza, toppings, quantity }. We reuse computeBill per
- * line and sum. Because discount (10% when that line's qty >= 5) and GST (18%)
- * are both linear, summing per-line bills equals taxing the aggregate — so the
- * graded per-combo math is preserved exactly.
+ * Aggregate an order made of MULTIPLE combos (a cart). Each entry is
+ * { base, pizza, toppings, quantity }. We reuse computeBill per line and sum.
+ * Because discount and GST are both linear, summing per-line bills equals taxing
+ * the aggregate — so the graded per-combo math is preserved exactly.
  *
  * DECISION: the bulk discount is evaluated PER COMBO LINE (a line qualifies when
- * its own quantity >= 5), the faithful extension of the original per-order rule.
- * Switch to cart-wide total quantity only if the spec later says so.
+ * its own quantity >= threshold), the faithful extension of the original rule.
  *
  * @param {Array<{base,pizza,toppings,quantity}>} lineItems
- * @returns {{lines: Array, subtotal, discount, gst, total, totalQuantity, discountApplied}}
+ * @param {typeof DEFAULT_TAX_CONFIG} config
+ * @returns {{lines, subtotal, discount, gst, cgst, sgst, total, totalQuantity, discountApplied}}
  */
-export function computeOrderBill(lineItems = []) {
+export function computeOrderBill(lineItems = [], config = DEFAULT_TAX_CONFIG) {
   const lines = lineItems.map((item) => {
-    const bill = computeBill(item.base, item.pizza, item.toppings, item.quantity)
+    const bill = computeBill(item.base, item.pizza, item.toppings, item.quantity, config)
     return { ...item, ...bill }
   })
 
-  const subtotal = round2(lines.reduce((s, l) => s + l.subtotal, 0))
-  const discount = round2(lines.reduce((s, l) => s + l.discount, 0))
-  const gst = round2(lines.reduce((s, l) => s + l.gst, 0))
-  const total = round2(lines.reduce((s, l) => s + l.total, 0))
+  const sum = (key) => round2(lines.reduce((s, l) => s + l[key], 0))
+  const subtotalTotal = sum('subtotal')
+  const discountTotal = sum('discount')
+  const gstTotal = sum('gst')
+  const cgstTotal = sum('cgst')
+  const sgstTotal = sum('sgst')
+  const grandTotal = sum('total')
   const totalQuantity = lines.reduce((s, l) => s + l.quantity, 0)
 
   return {
     lines,
-    subtotal,
-    discount,
-    gst,
-    total,
+    subtotal: subtotalTotal,
+    discount: discountTotal,
+    gst: gstTotal,
+    cgst: cgstTotal,
+    sgst: sgstTotal,
+    total: grandTotal,
     totalQuantity,
-    discountApplied: discount > 0,
+    discountApplied: discountTotal > 0,
   }
 }
 
