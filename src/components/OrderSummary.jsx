@@ -24,7 +24,7 @@ export default function OrderSummary({ order, taxConfig = DEFAULT_TAX_CONFIG, on
         {!hasItems ? (
           <>
             <p className="text-sm text-muted-foreground">
-              No pizzas yet. Tap a pizza above, pick a base, then press{' '}
+              No pizzas yet. Tap a pizza below, pick a base, then press{' '}
               <span className="font-medium text-foreground">Add to cart</span>.
             </p>
             <FieldError id="cart-error">{error}</FieldError>

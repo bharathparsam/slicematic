@@ -3,6 +3,7 @@ import { validateName, validatePhone, validateQuantity } from '../validators'
 import { unitPrice, subtotal, discount, gst, gstBreakdown, finalTotal, computeBill, computeOrderBill } from '../billing'
 import { parseMenuText } from '../menuLoader'
 import { parseTaxConfig, DEFAULT_TAX_CONFIG } from '../taxConfig'
+import { formatOrderCode } from '../orderStore'
 
 describe('validateName', () => {
   it('rejects only-spaces', () => expect(validateName('   ').valid).toBe(false))
@@ -186,6 +187,19 @@ describe('parseTaxConfig (defensive, customizable rates)', () => {
     expect(cfg.gst.rate).toBe(0.05)
     expect(cfg.discount.rate).toBe(0.1)
     expect(cfg.discount.minQuantity).toBe(5)
+  })
+})
+
+describe('formatOrderCode', () => {
+  it('zero-pads to a SM-#### tracking code', () => {
+    expect(formatOrderCode(1)).toBe('SM-0001')
+    expect(formatOrderCode(42)).toBe('SM-0042')
+    expect(formatOrderCode(1042)).toBe('SM-1042')
+  })
+  it('is defensive about bad input', () => {
+    expect(formatOrderCode(0)).toBe('SM-0000')
+    expect(formatOrderCode(-3)).toBe('SM-0000')
+    expect(formatOrderCode(undefined)).toBe('SM-0000')
   })
 })
 

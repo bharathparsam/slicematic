@@ -31,8 +31,11 @@ export default function MenuSelector({
   const [builder, setBuilder] = useState(EMPTY_BUILDER)
   const [baseError, setBaseError] = useState('')
   const [justSaved, setJustSaved] = useState('') // { id, kind } serialised as `${id}:${kind}`
+  const [scrollTargetId, setScrollTargetId] = useState('') // pizza to scroll to once expanded
 
-  // An edit request from the cart: open that pizza pre-filled and scroll to it.
+  // An edit request from the cart: open that pizza pre-filled, then scroll to it
+  // AFTER its expand animation settles (see PizzaRow's onAnimationComplete) so the
+  // final layout — not the mid-animation one — decides the scroll position.
   useEffect(() => {
     if (!editSeed) return
     setOpenId(editSeed.pizzaId)
@@ -42,11 +45,7 @@ export default function MenuSelector({
       quantity: editSeed.quantity,
     })
     setBaseError('')
-    requestAnimationFrame(() => {
-      document
-        .getElementById(`pizza-${editSeed.pizzaId}`)
-        ?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-    })
+    setScrollTargetId(editSeed.pizzaId)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editSeed?.nonce])
 
@@ -121,6 +120,8 @@ export default function MenuSelector({
               open={openId === pizza.id}
               editing={editingPizzaId === pizza.id}
               savedKind={savedKind}
+              shouldScroll={scrollTargetId === pizza.id}
+              onScrolled={() => setScrollTargetId('')}
               builder={openId === pizza.id ? builder : EMPTY_BUILDER}
               baseError={openId === pizza.id ? baseError : ''}
               onToggleOpen={() => toggleOpen(pizza.id)}
@@ -144,6 +145,8 @@ function PizzaRow({
   open,
   editing,
   savedKind,
+  shouldScroll,
+  onScrolled,
   builder,
   baseError,
   onToggleOpen,
@@ -214,6 +217,14 @@ function PizzaRow({
             animate={{ height: 'auto', opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
             transition={{ duration: 0.28, ease: [0.4, 0, 0.2, 1] }}
+            onAnimationComplete={() => {
+              if (open && shouldScroll) {
+                document
+                  .getElementById(`pizza-${pizza.id}`)
+                  ?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+                onScrolled?.()
+              }
+            }}
             className="overflow-hidden"
           >
             <div className="space-y-5 border-t border-border px-4 pb-4 pt-4">
