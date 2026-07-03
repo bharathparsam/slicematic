@@ -114,16 +114,39 @@ describe('computeOrderBill (multi-combo cart)', () => {
     expect(order.lines).toHaveLength(2)
   })
 
-  it('applies discount per qualifying line only', () => {
+  it('discounts EVERY line once the overall quantity qualifies (>= 5)', () => {
     const order = computeOrderBill([
       { base, pizza, toppings: [], quantity: 5 }, // sub 1500, disc 150
-      { base, pizza, toppings: [], quantity: 2 }, // sub 600, disc 0
+      { base, pizza, toppings: [], quantity: 2 }, // sub 600, disc 60 (order total 7 >= 5)
     ])
+    expect(order.totalQuantity).toBe(7)
     expect(order.subtotal).toBe(2100)
-    expect(order.discount).toBe(150)
-    expect(order.gst).toBe(97.5) // 5% of (2100 - 150) = 5% of 1950
-    expect(order.total).toBe(2047.5)
+    expect(order.discount).toBe(210) // 10% of both lines, not just the qty-5 line
+    expect(order.gst).toBe(94.5) // 5% of (2100 - 210) = 5% of 1890
+    expect(order.total).toBe(1984.5)
     expect(order.discountApplied).toBe(true)
+    expect(order.lines.every((l) => l.discountApplied)).toBe(true)
+  })
+
+  it('applies the discount at the exact boundary of 5 pizzas across lines', () => {
+    const order = computeOrderBill([
+      { base, pizza, toppings: [], quantity: 3 }, // sub 900, disc 90
+      { base, pizza, toppings: [], quantity: 2 }, // sub 600, disc 60 (order total 5)
+    ])
+    expect(order.totalQuantity).toBe(5)
+    expect(order.discount).toBe(150) // 10% of 1500
+    expect(order.discountApplied).toBe(true)
+  })
+
+  it('gives NO discount when the overall quantity is below 5, even across lines', () => {
+    const order = computeOrderBill([
+      { base, pizza, toppings: [], quantity: 2 }, // sub 600
+      { base, pizza, toppings: [], quantity: 2 }, // sub 600 (order total 4 < 5)
+    ])
+    expect(order.totalQuantity).toBe(4)
+    expect(order.discount).toBe(0)
+    expect(order.gst).toBe(60) // 5% of 1200
+    expect(order.discountApplied).toBe(false)
   })
 
   it('empty cart yields zeroes', () => {

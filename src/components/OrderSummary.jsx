@@ -1,37 +1,51 @@
-import { Card, CardHeader, CardTitle, CardContent, Table, THead, TH, TR, TD } from '@/components/ui/primitives'
+import { motion, AnimatePresence } from 'framer-motion'
+import { Card, CardHeader, CardTitle, CardContent, Table, THead, TH, TR, TD, FieldError } from '@/components/ui/primitives'
 import { formatCurrency } from '@/lib/billing'
 import { DEFAULT_TAX_CONFIG } from '@/lib/taxConfig'
 
 const pct = (r) => `${+(r * 100).toFixed(2)}%`
 
 /**
- * Step 3 — The order (cart). Lists every combo added, each with an inline
- * quantity stepper and a remove control, then the aggregate itemised bill.
- * `order` is the single source of truth from billing.computeOrderBill — the UI
- * never re-does the math here. GST labels/rates come from `taxConfig`.
+ * The order (cart). Lists every combo added, each with an inline quantity
+ * stepper and a remove control, then the aggregate itemised bill. `order` is
+ * the single source of truth from billing.computeOrderBill — the UI never
+ * re-does the math here. GST labels/rates come from `taxConfig`.
  */
-export default function OrderSummary({ order, taxConfig = DEFAULT_TAX_CONFIG, onUpdateQty, onRemove }) {
+export default function OrderSummary({ order, taxConfig = DEFAULT_TAX_CONFIG, onUpdateQty, onRemove, onEdit, editingLineId = '', error }) {
   const hasItems = order && order.lines.length > 0
   const { gst } = taxConfig
 
   return (
     <Card>
       <CardHeader>
-        <CardTitle>3. Your order</CardTitle>
+        <CardTitle>Your order</CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
         {!hasItems ? (
-          <p className="text-sm text-muted-foreground">
-            No pizzas yet. Build a combo on the left and press{' '}
-            <span className="font-medium text-foreground">Add to order</span>.
-          </p>
+          <>
+            <p className="text-sm text-muted-foreground">
+              No pizzas yet. Tap a pizza above, pick a base, then press{' '}
+              <span className="font-medium text-foreground">Add to cart</span>.
+            </p>
+            <FieldError id="cart-error">{error}</FieldError>
+          </>
         ) : (
           <>
             <ul className="space-y-2">
+              <AnimatePresence initial={false}>
               {order.lines.map((line) => (
-                <li
+                <motion.li
                   key={line.lineId}
-                  className="rounded-md border border-border p-3"
+                  layout
+                  initial={{ opacity: 0, y: -8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, height: 0, marginTop: 0 }}
+                  className={
+                    'rounded-md border p-3 transition-colors ' +
+                    (line.lineId === editingLineId
+                      ? 'border-brand ring-1 ring-brand'
+                      : 'border-border')
+                  }
                 >
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
@@ -44,14 +58,24 @@ export default function OrderSummary({ order, taxConfig = DEFAULT_TAX_CONFIG, on
                           ' · ' + line.toppings.map((t) => t.name).join(', ')}
                       </p>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => onRemove(line.lineId)}
-                      className="shrink-0 rounded px-2 py-1 text-xs font-medium text-destructive hover:bg-destructive/10"
-                      aria-label={`Remove ${line.pizza.name}`}
-                    >
-                      Remove
-                    </button>
+                    <div className="flex shrink-0 items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={() => onEdit?.(line.lineId)}
+                        className="rounded px-2 py-1 text-xs font-medium text-brand-dark hover:bg-brand/10"
+                        aria-label={`Edit ${line.pizza.name}`}
+                      >
+                        Edit
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onRemove(line.lineId)}
+                        className="rounded px-2 py-1 text-xs font-medium text-destructive hover:bg-destructive/10"
+                        aria-label={`Remove ${line.pizza.name}`}
+                      >
+                        Remove
+                      </button>
+                    </div>
                   </div>
 
                   <div className="mt-2 flex items-center justify-between">
@@ -71,8 +95,9 @@ export default function OrderSummary({ order, taxConfig = DEFAULT_TAX_CONFIG, on
                       )}
                     </div>
                   </div>
-                </li>
+                </motion.li>
               ))}
+              </AnimatePresence>
             </ul>
 
             {/* Aggregate itemised bill for the whole order */}
@@ -91,7 +116,7 @@ export default function OrderSummary({ order, taxConfig = DEFAULT_TAX_CONFIG, on
                 />
                 {order.discountApplied && (
                   <LineRow
-                    label={`Discount (${pct(taxConfig.discount.rate)} on qualifying combos)`}
+                    label={`Discount (${pct(taxConfig.discount.rate)} — order of ${taxConfig.discount.minQuantity}+ pizzas)`}
                     value={-order.discount}
                     className="text-brand-dark"
                   />

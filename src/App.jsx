@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { motion, AnimatePresence } from 'framer-motion'
+import TableSelect from '@/components/TableSelect'
 import CustomerIntakeForm from '@/components/CustomerIntakeForm'
 import MenuSelector from '@/components/MenuSelector'
 import OrderSummary from '@/components/OrderSummary'
@@ -7,8 +9,9 @@ import AdminOrdersTable from '@/components/AdminOrdersTable'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, Button } from '@/components/ui/primitives'
 import { loadAllMenus } from '@/lib/menuLoader'
 import { loadTaxConfig, DEFAULT_TAX_CONFIG } from '@/lib/taxConfig'
-import { validateName, validatePhone, validateQuantity } from '@/lib/validators'
-import { computeBill, computeOrderBill, formatCurrency } from '@/lib/billing'
+import { loadTables, DEFAULT_TABLES } from '@/lib/tablesLoader'
+import { validateName, validatePhone } from '@/lib/validators'
+import { computeOrderBill, formatCurrency } from '@/lib/billing'
 import { saveOrder } from '@/lib/orderStore'
 
 export default function App() {
@@ -16,10 +19,10 @@ export default function App() {
   return (
     <div className="min-h-screen">
       <Header view={view} setView={setView} />
-      <main className="mx-auto max-w-6xl px-4 py-6">
+      <main className="mx-auto w-full max-w-3xl px-4 py-6">
         {view === 'order' ? <OrderFlow /> : <AdminOrdersTable />}
       </main>
-      <footer className="mx-auto max-w-6xl px-4 pb-8 pt-2 text-center text-xs text-muted-foreground">
+      <footer className="mx-auto max-w-3xl px-4 pb-8 pt-2 text-center text-xs text-muted-foreground">
         SliceMatic MVP · local-only (localStorage) · Delhi
       </footer>
     </div>
@@ -32,8 +35,8 @@ function Header({ view, setView }) {
     { id: 'admin', label: 'Admin' },
   ]
   return (
-    <header className="border-b border-border bg-background">
-      <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
+    <header className="sticky top-0 z-10 border-b border-border bg-background/95 backdrop-blur">
+      <div className="mx-auto flex max-w-3xl items-center justify-between px-4 py-3">
         <div className="flex items-center gap-2">
           <span className="text-2xl" aria-hidden="true">🍕</span>
           <div>
@@ -63,31 +66,28 @@ function Header({ view, setView }) {
   )
 }
 
-const EMPTY_SELECTION = {
-  baseId: '',
-  pizzaId: '',
-  toppingIds: [],
-  quantity: '1',
-}
-
 function OrderFlow() {
-  // --- Menu load state ------------------------------------------------
+  // --- Load state (menu required; tax + tables self-default) ----------
   const [menu, setMenu] = useState(null)
   const [taxConfig, setTaxConfig] = useState(DEFAULT_TAX_CONFIG)
+  const [tables, setTables] = useState(DEFAULT_TABLES.tables)
+  const [tableLabel, setTableLabel] = useState(DEFAULT_TABLES.label)
   const [loadError, setLoadError] = useState('')
   const [loading, setLoading] = useState(true)
 
-  // Session timestamp captured when the form starts.
+  // Session timestamp captured when the flow starts.
   const sessionStartedAt = useRef(new Date().toISOString())
 
   async function load() {
     setLoading(true)
     setLoadError('')
     try {
-      // Menu must load; tax config self-defaults if its file is missing/bad.
-      const [data, cfg] = await Promise.all([loadAllMenus(), loadTaxConfig()])
+      // Menu must load; tax config + tables self-default if their files are bad.
+      const [data, cfg, tbl] = await Promise.all([loadAllMenus(), loadTaxConfig(), loadTables()])
       setMenu(data)
       setTaxConfig(cfg)
+      setTables(tbl.tables)
+      setTableLabel(tbl.label)
     } catch (err) {
       setMenu(null)
       setLoadError(err.message || 'Failed to load menu.')
@@ -101,19 +101,24 @@ function OrderFlow() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // --- Stage: pick a table, then order --------------------------------
+  const [stage, setStage] = useState('table') // 'table' | 'order'
+  const [table, setTable] = useState('')
+
   // --- Customer state -------------------------------------------------
   const [customer, setCustomer] = useState({ name: '', phone: '' })
   const [custErrors, setCustErrors] = useState({ name: '', phone: '' })
   const [touched, setTouched] = useState({ name: false, phone: false })
 
-  // --- Combo builder state --------------------------------------------
-  const [selection, setSelection] = useState(EMPTY_SELECTION)
-  const [selErrors, setSelErrors] = useState({ base: '', pizza: '', quantity: '' })
-  const [comboError, setComboError] = useState('')
-
   // --- Cart (multiple combos per order) -------------------------------
   const [cart, setCart] = useState([])
+  const [cartError, setCartError] = useState('')
   const lineCounter = useRef(0)
+
+  // --- Edit-in-place: a cart line pulled back into the builder ---------
+  const [editingLineId, setEditingLineId] = useState('')
+  const [editSeed, setEditSeed] = useState(null) // { nonce, pizzaId, baseId, toppingIds, quantity }
+  const editNonce = useRef(0)
 
   // --- Payment / submit -----------------------------------------------
   const [payment, setPayment] = useState('')
@@ -121,29 +126,6 @@ function OrderFlow() {
   const [confirmed, setConfirmed] = useState(null)
   const submittingRef = useRef(false) // synchronous guard vs double-click
   const [submitting, setSubmitting] = useState(false)
-
-  // --- Derived: current builder combo ---------------------------------
-  const base = useMemo(
-    () => menu?.bases.find((b) => b.id === selection.baseId) || null,
-    [menu, selection.baseId]
-  )
-  const pizza = useMemo(
-    () => menu?.pizzas.find((p) => p.id === selection.pizzaId) || null,
-    [menu, selection.pizzaId]
-  )
-  const toppings = useMemo(
-    () => menu?.toppings.filter((t) => selection.toppingIds.includes(t.id)) || [],
-    [menu, selection.toppingIds]
-  )
-
-  const qtyCheck = validateQuantity(selection.quantity)
-  const discountActive = qtyCheck.valid && Number(selection.quantity) >= 5
-
-  // Live preview of the combo currently being built (before it's added).
-  const preview = useMemo(() => {
-    if (!base || !pizza || !qtyCheck.valid) return null
-    return computeBill(base, pizza, toppings, selection.quantity, taxConfig)
-  }, [base, pizza, toppings, selection.quantity, qtyCheck.valid, taxConfig])
 
   // Aggregate bill for everything in the cart.
   const orderBill = useMemo(() => computeOrderBill(cart, taxConfig), [cart, taxConfig])
@@ -163,69 +145,48 @@ function OrderFlow() {
     setCustErrors((e) => ({ ...e, [field]: check.error }))
   }
 
-  // --- Builder handlers -----------------------------------------------
-  function onSelectBase(id) {
-    setSelection((s) => ({ ...s, baseId: id }))
-    setSelErrors((e) => ({ ...e, base: '' }))
-    setComboError('')
-  }
-  function onSelectPizza(id) {
-    setSelection((s) => ({ ...s, pizzaId: id }))
-    setSelErrors((e) => ({ ...e, pizza: '' }))
-    setComboError('')
-  }
-  function onToggleTopping(id) {
-    setSelection((s) => ({
-      ...s,
-      toppingIds: s.toppingIds.includes(id)
-        ? s.toppingIds.filter((x) => x !== id)
-        : [...s.toppingIds, id],
-    }))
-  }
-  function onQuantityChange(value) {
-    setSelection((s) => ({ ...s, quantity: value }))
-    setSelErrors((e) => ({ ...e, quantity: validateQuantity(value).error }))
-  }
-  function onQuantityBlur() {
-    setSelErrors((e) => ({ ...e, quantity: validateQuantity(selection.quantity).error }))
-  }
-
-  // Validate the builder and, if OK, push the combo onto the cart.
-  function onAddCombo() {
-    const quantityCheck = validateQuantity(selection.quantity)
-    const baseErr = selection.baseId ? '' : 'Please select a base.'
-    const pizzaErr = selection.pizzaId ? '' : 'Please select a pizza.'
-
-    setSelErrors({ base: baseErr, pizza: pizzaErr, quantity: quantityCheck.error })
-
-    if (baseErr || pizzaErr || !quantityCheck.valid) {
-      setComboError('Complete the combo above before adding it.')
-      const focusId = baseErr ? null : pizzaErr ? null : !quantityCheck.valid ? 'qty' : null
-      const el = focusId && document.getElementById(focusId)
-      if (el?.focus) el.focus()
-      return
-    }
-
-    const lineId = `L${++lineCounter.current}`
-    setCart((c) => [
-      ...c,
-      { lineId, base, pizza, toppings, quantity: Number(selection.quantity) },
-    ])
-    // Reset the builder for the next pizza.
-    setSelection(EMPTY_SELECTION)
-    setSelErrors({ base: '', pizza: '', quantity: '' })
-    setComboError('')
-  }
-
   // --- Cart handlers --------------------------------------------------
+  // A completed combo arrives from the pizza builder: { base, pizza, toppings, quantity }.
+  // When we're editing a line, replace it in place (keeping its lineId); else append.
+  function onAddCombo(combo) {
+    if (editingLineId) {
+      setCart((c) =>
+        c.map((line) => (line.lineId === editingLineId ? { lineId: line.lineId, ...combo } : line))
+      )
+      setEditingLineId('')
+      setEditSeed(null)
+    } else {
+      const lineId = `L${++lineCounter.current}`
+      setCart((c) => [...c, { lineId, ...combo }])
+    }
+    setCartError('')
+  }
   function updateLineQty(lineId, nextQty) {
     const clamped = Math.max(1, Math.min(10, nextQty))
-    setCart((c) =>
-      c.map((line) => (line.lineId === lineId ? { ...line, quantity: clamped } : line))
-    )
+    setCart((c) => c.map((line) => (line.lineId === lineId ? { ...line, quantity: clamped } : line)))
   }
   function removeLine(lineId) {
     setCart((c) => c.filter((line) => line.lineId !== lineId))
+    if (lineId === editingLineId) cancelEdit() // dropping the line we were editing
+  }
+
+  // Pull a cart line back into the builder: open its pizza pre-filled + scroll.
+  function editLine(lineId) {
+    const line = cart.find((l) => l.lineId === lineId)
+    if (!line) return
+    setEditingLineId(lineId)
+    setEditSeed({
+      nonce: ++editNonce.current,
+      pizzaId: line.pizza.id,
+      baseId: line.base.id,
+      toppingIds: line.toppings.map((t) => t.id),
+      quantity: line.quantity,
+    })
+    setCartError('')
+  }
+  function cancelEdit() {
+    setEditingLineId('')
+    setEditSeed(null)
   }
 
   // --- Confirm --------------------------------------------------------
@@ -240,13 +201,12 @@ function OrderFlow() {
     setTouched({ name: true, phone: true })
     setCustErrors({ name: nameCheck.error, phone: phoneCheck.error })
     setPaymentError(payErr)
-    if (cartEmpty) setComboError('Add at least one pizza to the order.')
+    if (cartEmpty) setCartError('Add at least one pizza to the order.')
 
     const ok = nameCheck.valid && phoneCheck.valid && !cartEmpty && !payErr
     if (!ok) {
       const focusId =
-        (nameCheck.valid ? '' : 'cust-name') ||
-        (phoneCheck.valid ? '' : 'cust-phone')
+        (nameCheck.valid ? '' : 'cust-name') || (phoneCheck.valid ? '' : 'cust-phone')
       const el = focusId && document.getElementById(focusId)
       if (el?.focus) el.focus()
       return
@@ -261,6 +221,7 @@ function OrderFlow() {
     const order = {
       timestamp: new Date().toISOString(),
       sessionStartedAt: sessionStartedAt.current,
+      table: table || null,
       customerName: customer.name.trim(),
       phone: customer.phone.trim(),
       items: finalBill.lines.map((l) => ({
@@ -301,13 +262,15 @@ function OrderFlow() {
     setCustomer({ name: '', phone: '' })
     setCustErrors({ name: '', phone: '' })
     setTouched({ name: false, phone: false })
-    setSelection(EMPTY_SELECTION)
-    setSelErrors({ base: '', pizza: '', quantity: '' })
-    setComboError('')
     setCart([])
+    setCartError('')
+    setEditingLineId('')
+    setEditSeed(null)
     setPayment('')
     setPaymentError('')
     setConfirmed(null)
+    setTable('')
+    setStage('table')
     sessionStartedAt.current = new Date().toISOString()
   }
 
@@ -331,67 +294,106 @@ function OrderFlow() {
     return <OrderConfirmed order={confirmed} onNew={startNewOrder} />
   }
 
+  // Table-selection landing screen.
+  if (stage === 'table') {
+    return (
+      <AnimatePresence mode="wait">
+        <motion.div
+          key="table"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.2 }}
+        >
+          <TableSelect
+            tables={tables}
+            label={tableLabel}
+            selected={table}
+            onSelect={setTable}
+            onStart={() => setStage('order')}
+          />
+        </motion.div>
+      </AnimatePresence>
+    )
+  }
+
+  // Order-building flow (mobile-first single column).
   return (
-    <div className="grid gap-6 lg:grid-cols-[1fr_400px]">
-      <div className="space-y-6">
-        <CustomerIntakeForm
-          values={customer}
-          errors={custErrors}
-          onChange={onCustChange}
-          onBlur={onCustBlur}
-        />
-        <MenuSelector
-          menu={menu}
-          selection={selection}
-          errors={selErrors}
-          onSelectBase={onSelectBase}
-          onSelectPizza={onSelectPizza}
-          onToggleTopping={onToggleTopping}
-          onQuantityChange={onQuantityChange}
-          onQuantityBlur={onQuantityBlur}
-          discountActive={discountActive}
-          onAddCombo={onAddCombo}
-          comboError={comboError}
-          preview={preview}
-        />
+    <motion.div
+      key="order"
+      initial={{ opacity: 0, x: 24 }}
+      animate={{ opacity: 1, x: 0 }}
+      transition={{ duration: 0.25, ease: [0.4, 0, 0.2, 1] }}
+      className="mx-auto max-w-md space-y-5"
+    >
+      {/* Table banner + change */}
+      <div className="flex items-center justify-between rounded-lg bg-brand/5 px-4 py-3">
+        <p className="text-sm">
+          <span className="text-muted-foreground">Ordering for </span>
+          <span className="font-bold text-brand-dark">{table}</span>
+        </p>
+        <button
+          type="button"
+          onClick={() => setStage('table')}
+          className="rounded px-2 py-1 text-xs font-semibold text-brand-dark hover:bg-brand/10"
+        >
+          Change
+        </button>
       </div>
 
-      {/* Live cart + payment + confirm — sticky on desktop. */}
-      <div className="space-y-6 lg:sticky lg:top-6 lg:self-start">
-        <OrderSummary
-          order={orderBill}
-          taxConfig={taxConfig}
-          onUpdateQty={updateLineQty}
-          onRemove={removeLine}
-        />
-        <Card>
-          <CardHeader>
-            <CardTitle>4. Payment &amp; confirm</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <PaymentSelector
-              value={payment}
-              error={paymentError}
-              onChange={(m) => {
-                setPayment(m)
-                setPaymentError('')
-              }}
-            />
-            <Button
-              className="w-full py-3 text-base"
-              onClick={handleConfirm}
-              disabled={submitting}
-            >
-              {submitting
-                ? 'Saving…'
-                : cart.length > 0
-                  ? `Confirm order · ${formatCurrency(orderBill.total)}`
-                  : 'Confirm order'}
-            </Button>
-          </CardContent>
-        </Card>
-      </div>
-    </div>
+      <CustomerIntakeForm
+        values={customer}
+        errors={custErrors}
+        onChange={onCustChange}
+        onBlur={onCustBlur}
+      />
+
+      <MenuSelector
+        menu={menu}
+        taxConfig={taxConfig}
+        onAddCombo={onAddCombo}
+        editSeed={editSeed}
+        editingPizzaId={editSeed?.pizzaId ?? ''}
+        onCancelEdit={cancelEdit}
+      />
+
+      <OrderSummary
+        order={orderBill}
+        taxConfig={taxConfig}
+        onUpdateQty={updateLineQty}
+        onRemove={removeLine}
+        onEdit={editLine}
+        editingLineId={editingLineId}
+        error={cartError}
+      />
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Payment &amp; confirm</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <PaymentSelector
+            value={payment}
+            error={paymentError}
+            onChange={(m) => {
+              setPayment(m)
+              setPaymentError('')
+            }}
+          />
+          <Button
+            className="w-full py-3.5 text-base"
+            onClick={handleConfirm}
+            disabled={submitting}
+          >
+            {submitting
+              ? 'Saving…'
+              : cart.length > 0
+                ? `Confirm order · ${formatCurrency(orderBill.total)}`
+                : 'Confirm order'}
+          </Button>
+        </CardContent>
+      </Card>
+    </motion.div>
   )
 }
 
@@ -414,31 +416,46 @@ function StatusPanel({ title, tone = 'muted', children }) {
 function OrderConfirmed({ order, onNew }) {
   const itemCount = order.itemCount ?? order.items?.length ?? 0
   return (
-    <Card className="mx-auto max-w-lg">
-      <CardHeader>
-        <div className="mb-1 text-4xl" aria-hidden="true">✅</div>
-        <CardTitle>Order confirmed</CardTitle>
-        <CardDescription>
-          Saved for {order.customerName} · {order.paymentMode}
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-3">
-        <div className="rounded-md bg-muted p-4">
-          <div className="flex items-center justify-between">
-            <span className="text-sm text-muted-foreground">Amount paid</span>
-            <span className="text-2xl font-extrabold text-brand-dark">
-              {formatCurrency(order.total)}
-            </span>
+    <motion.div
+      initial={{ opacity: 0, scale: 0.96 }}
+      animate={{ opacity: 1, scale: 1 }}
+      transition={{ type: 'spring', stiffness: 300, damping: 24 }}
+    >
+      <Card className="mx-auto max-w-md">
+        <CardHeader>
+          <motion.div
+            className="mb-1 text-5xl"
+            aria-hidden="true"
+            initial={{ scale: 0 }}
+            animate={{ scale: 1 }}
+            transition={{ type: 'spring', stiffness: 260, damping: 18, delay: 0.1 }}
+          >
+            ✅
+          </motion.div>
+          <CardTitle>Order confirmed</CardTitle>
+          <CardDescription>
+            {order.table ? `${order.table} · ` : ''}
+            {order.customerName} · {order.paymentMode}
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="rounded-md bg-muted p-4">
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-muted-foreground">Amount paid</span>
+              <span className="text-2xl font-extrabold text-brand-dark">
+                {formatCurrency(order.total)}
+              </span>
+            </div>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {itemCount} pizza type{itemCount === 1 ? '' : 's'} · {order.quantity}{' '}
+              pizza{order.quantity === 1 ? '' : 's'} total
+            </p>
           </div>
-          <p className="mt-1 text-xs text-muted-foreground">
-            {itemCount} pizza type{itemCount === 1 ? '' : 's'} · {order.quantity}{' '}
-            pizza{order.quantity === 1 ? '' : 's'} total
-          </p>
-        </div>
-        <Button className="w-full" onClick={onNew}>
-          New order
-        </Button>
-      </CardContent>
-    </Card>
+          <Button className="w-full" onClick={onNew}>
+            New order
+          </Button>
+        </CardContent>
+      </Card>
+    </motion.div>
   )
 }

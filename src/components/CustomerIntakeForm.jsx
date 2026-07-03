@@ -8,7 +8,7 @@ export default function CustomerIntakeForm({ values, errors, onChange, onBlur })
   return (
     <Card>
       <CardHeader>
-        <CardTitle>1. Customer details</CardTitle>
+        <CardTitle>Your details</CardTitle>
         <CardDescription>Who's this order for?</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">

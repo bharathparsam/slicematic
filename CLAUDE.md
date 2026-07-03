@@ -72,9 +72,12 @@ src/
   items + one payment. Each combo = one base, one pizza, zero+ toppings, quantity
   1–10. Customers build a combo and "Add to order", repeating for several pizzas.
   (This extends the original one-combo spec at the client's request.)
-  - **Discount is evaluated per combo line** (a line gets 10% off when its own
-    quantity ≥ 5), not on cart-wide total quantity. Documented in
-    `billing.computeOrderBill`. Revisit if the spec later mandates cart-total.
+  - **Discount is gated by the cart-wide total quantity** (10% off when the order
+    totals ≥ 5 pizzas across all lines). When it applies, it is calculated and
+    shown **per line** (10% of each line's own subtotal). Documented in
+    `billing.computeOrderBill`; `computeBill` still defaults to a per-line gate
+    for standalone/preview use. (Client changed this from the earlier per-line
+    gate — see `changes.md`.)
   - The saved order holds an `items[]` array; `quantity` on the record is the
     total pizzas across all lines.
 - **Validation:** name = letters + spaces only, 2–40 chars; phone = exactly 10
@@ -82,19 +85,22 @@ src/
 - **Billing math (in `billing.js`):**
   - `unitPrice` = base + pizza + all selected toppings
   - `subtotal` = unitPrice × quantity
-  - `discount` = 10% of subtotal, **only when quantity ≥ 5**, else 0
+  - `discount` = 10% of a line's subtotal, applied to every line **only when the
+    order's total quantity ≥ 5** (the gate lives in `computeOrderBill`), else 0
   - **`gst` = GST rate × the POST-discount amount** = `rate × (subtotal − discount)`.
     This is the calculation reviewers ask about — GST is NOT on the raw subtotal.
     `gstBreakdown` further splits it into CGST + SGST for the bill.
   - `finalTotal` = subtotal − discount + gst
   - All money is rounded to 2 dp via `round2`.
 - **GST rate is config-driven, not hardcoded** (`taxConfig.js` ← `public/config/tax_config.json`).
-  SliceMatic is a standalone restaurant/takeaway ⇒ **5% GST, no input tax credit,
-  split 2.5% CGST + 2.5% SGST** (per
-  https://cleartax.in/s/impact-gst-food-services-restaurant-business). A hotel
-  restaurant (room tariff ≥ ₹7,500) or e-commerce delivery would be 18% — change
-  the file, not the code. Billing functions take a `config` param and default to
-  `DEFAULT_TAX_CONFIG`; a missing/invalid config file self-defaults (non-fatal).
+  The config file currently sets **18% GST, split 9% CGST + 9% SGST** (per the
+  client's request in `changes.md`). The 5%-standalone-restaurant basis is still
+  the safe `DEFAULT_TAX_CONFIG` fallback and the reference case (per
+  https://cleartax.in/s/impact-gst-food-services-restaurant-business); a hotel
+  restaurant with room tariff ≥ ₹7,500 or e-commerce delivery is 18% — the rate
+  is a data choice, **change the file, not the code**. Billing functions take a
+  `config` param and default to `DEFAULT_TAX_CONFIG`; a missing/invalid config
+  file self-defaults (non-fatal).
 - **Defensive menu parsing:** trim every field, skip blank lines, require exactly
   3 `;`-separated fields, price must parse as a finite positive number. Malformed
   lines are skipped with a `console.warn` — never crash. If a whole file fails

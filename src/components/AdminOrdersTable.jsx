@@ -108,6 +108,7 @@ export default function AdminOrdersTable() {
           <Table>
             <THead>
               <TR>
+                <TH>Table</TH>
                 <TH>Customer</TH>
                 <TH>Items</TH>
                 <TH className="text-right">Qty</TH>
@@ -119,6 +120,7 @@ export default function AdminOrdersTable() {
             <tbody>
               {orders.map((o) => (
                 <TR key={o.id}>
+                  <TD className="whitespace-nowrap font-medium">{o.table || '—'}</TD>
                   <TD>
                     <div className="font-medium">{o.customerName}</div>
                     <div className="text-xs text-muted-foreground">{o.phone}</div>

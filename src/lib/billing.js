@@ -73,13 +73,20 @@ export function finalTotal(sub, disc, tax) {
 /**
  * Compute one combo's bill in one place so the UI and the saved record never
  * disagree. Returns every intermediate line for the itemised summary.
+ *
+ * The discount is always 10% of THIS line's own subtotal, but WHETHER it applies
+ * is gated by a quantity threshold. By default the gate is this line's own
+ * quantity (a standalone single-combo bill / builder preview). An order passes
+ * its TOTAL quantity as `discountGateQty` so every line in a qualifying cart is
+ * discounted together — see computeOrderBill.
  * @returns {{unit, quantity, subtotal, discount, gst, cgst, sgst, total, discountApplied}}
  */
-export function computeBill(base, pizza, toppings, quantity, config = DEFAULT_TAX_CONFIG) {
+export function computeBill(base, pizza, toppings, quantity, config = DEFAULT_TAX_CONFIG, discountGateQty = null) {
   const qty = Number(quantity)
   const unit = unitPrice(base, pizza, toppings)
   const sub = subtotal(unit, qty)
-  const disc = discount(sub, qty, config)
+  const gateQty = discountGateQty == null ? qty : discountGateQty
+  const disc = discount(sub, gateQty, config)
   const { total: tax, cgst, sgst } = gstBreakdown(sub, disc, config)
   const total = finalTotal(sub, disc, tax)
   return {
@@ -99,18 +106,23 @@ export function computeBill(base, pizza, toppings, quantity, config = DEFAULT_TA
  * Aggregate an order made of MULTIPLE combos (a cart). Each entry is
  * { base, pizza, toppings, quantity }. We reuse computeBill per line and sum.
  * Because discount and GST are both linear, summing per-line bills equals taxing
- * the aggregate — so the graded per-combo math is preserved exactly.
+ * the aggregate — so the per-combo math is preserved exactly.
  *
- * DECISION: the bulk discount is evaluated PER COMBO LINE (a line qualifies when
- * its own quantity >= threshold), the faithful extension of the original rule.
+ * DECISION: the bulk discount is gated by the ORDER's TOTAL quantity (the sum of
+ * every line's quantity). When that total meets the threshold, each line is
+ * discounted by 10% of its own subtotal (calculated + shown per line). So a cart
+ * of small lines that together reach 5+ pizzas all qualify; below 5, none do.
  *
  * @param {Array<{base,pizza,toppings,quantity}>} lineItems
  * @param {typeof DEFAULT_TAX_CONFIG} config
  * @returns {{lines, subtotal, discount, gst, cgst, sgst, total, totalQuantity, discountApplied}}
  */
 export function computeOrderBill(lineItems = [], config = DEFAULT_TAX_CONFIG) {
+  // Order-wide gate: the discount decision uses the total pizzas across the cart.
+  const totalQuantity = lineItems.reduce((s, item) => s + Number(item.quantity), 0)
+
   const lines = lineItems.map((item) => {
-    const bill = computeBill(item.base, item.pizza, item.toppings, item.quantity, config)
+    const bill = computeBill(item.base, item.pizza, item.toppings, item.quantity, config, totalQuantity)
     return { ...item, ...bill }
   })
 
@@ -121,7 +133,6 @@ export function computeOrderBill(lineItems = [], config = DEFAULT_TAX_CONFIG) {
   const cgstTotal = sum('cgst')
   const sgstTotal = sum('sgst')
   const grandTotal = sum('total')
-  const totalQuantity = lines.reduce((s, l) => s + l.quantity, 0)
 
   return {
     lines,
