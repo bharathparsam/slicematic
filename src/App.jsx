@@ -12,7 +12,7 @@ import { loadTaxConfig, DEFAULT_TAX_CONFIG } from '@/lib/taxConfig'
 import { loadTables, DEFAULT_TABLES } from '@/lib/tablesLoader'
 import { validateName, validatePhone } from '@/lib/validators'
 import { computeOrderBill, formatCurrency } from '@/lib/billing'
-import { saveOrder, updateOrder } from '@/lib/orderStore'
+import { saveOrder, updateOrder, getOccupiedTables } from '@/lib/orderStore'
 
 export default function App() {
   const [view, setView] = useState('order') // 'order' | 'admin'
@@ -161,6 +161,17 @@ function OrderFlow({ editingOrder = null, onDoneEditing }) {
   // --- Stage: pick a table, then order (editing skips table select) ---
   const [stage, setStage] = useState(isEditing ? 'order' : 'table') // 'table' | 'order'
   const [table, setTable] = useState(editingOrder?.table ?? '')
+
+  // Tables with an open (active) order — blocked until admin completes/cancels.
+  const [occupiedTables, setOccupiedTables] = useState(() => getOccupiedTables())
+  const refreshOccupancy = () => setOccupiedTables(getOccupiedTables())
+
+  // Re-show the table screen (new order / change table), always with fresh occupancy.
+  function goToTableStage() {
+    refreshOccupancy()
+    setTable('')
+    setStage('table')
+  }
 
   // --- Customer state (seeded from the order being edited) ------------
   const [customer, setCustomer] = useState({
@@ -351,8 +362,7 @@ function OrderFlow({ editingOrder = null, onDoneEditing }) {
     setPayment('')
     setPaymentError('')
     setConfirmed(null)
-    setTable('')
-    setStage('table')
+    goToTableStage()
     sessionStartedAt.current = new Date().toISOString()
   }
 
@@ -398,6 +408,7 @@ function OrderFlow({ editingOrder = null, onDoneEditing }) {
             tables={tables}
             label={tableLabel}
             selected={table}
+            occupied={occupiedTables}
             onSelect={setTable}
             onStart={() => setStage('order')}
           />
@@ -440,7 +451,7 @@ function OrderFlow({ editingOrder = null, onDoneEditing }) {
         </p>
         <button
           type="button"
-          onClick={() => setStage('table')}
+          onClick={goToTableStage}
           className="rounded px-2 py-1 text-xs font-semibold text-brand-dark hover:bg-brand/10"
         >
           Change

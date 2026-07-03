@@ -75,6 +75,7 @@ export function saveOrder(order) {
       id,
       orderNumber,
       orderCode: order.orderCode ?? formatOrderCode(orderNumber),
+      status: order.status ?? 'active', // active occupies its table until completed/cancelled
       savedAt: order.savedAt ?? new Date().toISOString(),
     }
 
@@ -118,6 +119,28 @@ export function updateOrder(order) {
  */
 export function cancelOrder(id) {
   return updateOrder({ id, status: 'cancelled', cancelledAt: new Date().toISOString() })
+}
+
+/**
+ * Mark an order completed (admin "Complete order"). This frees its table for
+ * new orders. Kept in records like everything else.
+ * @param {string} id
+ * @returns {{ ok: boolean, order?: object, reason?: string }}
+ */
+export function completeOrder(id) {
+  return updateOrder({ id, status: 'completed', completedAt: new Date().toISOString() })
+}
+
+/**
+ * Which tables currently have an OPEN order (status active) — i.e. are occupied
+ * and should be blocked from new orders until completed or cancelled. Pure read.
+ * @returns {string[]} table names, de-duplicated
+ */
+export function getOccupiedTables() {
+  const open = getAllOrders().filter(
+    (o) => o?.table && o.status !== 'completed' && o.status !== 'cancelled'
+  )
+  return [...new Set(open.map((o) => o.table))]
 }
 
 /** Clear all orders (admin utility / demo reset). */

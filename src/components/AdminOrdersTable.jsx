@@ -1,13 +1,13 @@
 import { useEffect, useState } from 'react'
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, Table, THead, TH, TR, TD, Button } from '@/components/ui/primitives'
-import { getAllOrders, clearOrders, cancelOrder } from '@/lib/orderStore'
+import { getAllOrders, clearOrders, cancelOrder, completeOrder } from '@/lib/orderStore'
 import { formatCurrency } from '@/lib/billing'
 
 /**
  * Step 6 — Admin view. Placeholder access only: a client-side password gate,
  * NOT real auth (real auth arrives with Supabase Auth in Stage 3). Lists all
  * orders, most recent first, with per-order Modify (full edit, handled up in
- * App) and soft-Cancel actions.
+ * App), Complete (frees the table) and soft-Cancel actions.
  */
 const PLACEHOLDER_PASSWORD = 'slice123'
 
@@ -51,7 +51,14 @@ export default function AdminOrdersTable({ onModify, unlocked, onUnlock }) {
     }
   }
 
+  function handleComplete(o) {
+    // Completing frees the table for new orders.
+    completeOrder(o.id)
+    refresh()
+  }
+
   const cancelledCount = orders.filter((o) => o.status === 'cancelled').length
+  const completedCount = orders.filter((o) => o.status === 'completed').length
 
   if (!unlocked) {
     return (
@@ -98,6 +105,7 @@ export default function AdminOrdersTable({ onModify, unlocked, onUnlock }) {
           <CardTitle>All orders ({orders.length})</CardTitle>
           <CardDescription>
             Most recent first.
+            {completedCount > 0 && ` · ${completedCount} completed`}
             {cancelledCount > 0 && ` · ${cancelledCount} cancelled`}
           </CardDescription>
         </div>
@@ -138,13 +146,15 @@ export default function AdminOrdersTable({ onModify, unlocked, onUnlock }) {
             <tbody>
               {orders.map((o) => {
                 const cancelled = o.status === 'cancelled'
+                const completed = o.status === 'completed'
+                const active = !cancelled && !completed
                 return (
-                  <TR key={o.id} className={cancelled ? 'opacity-60' : ''}>
+                  <TR key={o.id} className={active ? '' : 'opacity-60'}>
                     <TD className="whitespace-nowrap font-mono text-xs font-semibold text-brand-dark">
                       {o.orderCode || '—'}
                     </TD>
                     <TD>
-                      <StatusBadge cancelled={cancelled} />
+                      <StatusBadge status={o.status} />
                     </TD>
                     <TD className="whitespace-nowrap font-medium">{o.table || '—'}</TD>
                     <TD>
@@ -169,15 +179,22 @@ export default function AdminOrdersTable({ onModify, unlocked, onUnlock }) {
                       {o.updatedAt && <div className="text-[10px]">edited</div>}
                     </TD>
                     <TD className="text-right">
-                      <div className="flex justify-end gap-1">
-                        <button
-                          type="button"
-                          onClick={() => onModify?.(o)}
-                          className="rounded px-2 py-1 text-xs font-semibold text-brand-dark hover:bg-brand/10"
-                        >
-                          Modify
-                        </button>
-                        {!cancelled && (
+                      {active ? (
+                        <div className="flex justify-end gap-1">
+                          <button
+                            type="button"
+                            onClick={() => handleComplete(o)}
+                            className="rounded px-2 py-1 text-xs font-semibold text-green-700 hover:bg-green-100"
+                          >
+                            Complete
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => onModify?.(o)}
+                            className="rounded px-2 py-1 text-xs font-semibold text-brand-dark hover:bg-brand/10"
+                          >
+                            Modify
+                          </button>
                           <button
                             type="button"
                             onClick={() => handleCancel(o)}
@@ -185,8 +202,10 @@ export default function AdminOrdersTable({ onModify, unlocked, onUnlock }) {
                           >
                             Cancel
                           </button>
-                        )}
-                      </div>
+                        </div>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">—</span>
+                      )}
                     </TD>
                   </TR>
                 )
@@ -199,18 +218,23 @@ export default function AdminOrdersTable({ onModify, unlocked, onUnlock }) {
   )
 }
 
-/** Small status pill: Active (default) or Cancelled. */
-function StatusBadge({ cancelled }) {
-  if (cancelled) {
-    return (
-      <span className="inline-block whitespace-nowrap rounded-full bg-destructive/10 px-2 py-0.5 text-xs font-semibold text-destructive">
-        Cancelled
-      </span>
-    )
+/** Small status pill: Active (open, occupies its table), Completed or Cancelled. */
+function StatusBadge({ status }) {
+  const styles = {
+    completed: 'bg-green-100 text-green-700',
+    cancelled: 'bg-destructive/10 text-destructive',
+    active: 'bg-brand/10 text-brand-dark',
   }
+  const label = { completed: 'Completed', cancelled: 'Cancelled', active: 'Active' }
+  const key = status === 'completed' || status === 'cancelled' ? status : 'active'
   return (
-    <span className="inline-block whitespace-nowrap rounded-full bg-brand/10 px-2 py-0.5 text-xs font-semibold text-brand-dark">
-      Active
+    <span
+      className={
+        'inline-block whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-semibold ' +
+        styles[key]
+      }
+    >
+      {label[key]}
     </span>
   )
 }

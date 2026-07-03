@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Button } from '@/components/ui/primitives'
 
@@ -5,8 +6,24 @@ import { Button } from '@/components/ui/primitives'
  * Landing screen — "select your table". A tappable grid of tables read from
  * config (tablesLoader). Pick one, then the Order button slides up to start the
  * flow. Mobile-first: big tap targets, single sticky action.
+ *
+ * Tables with an open order (`occupied`) are blocked: tapping one shows a light
+ * "wrong table" nudge instead of selecting it, until an admin completes/cancels
+ * that order (see orderStore.getOccupiedTables + the Admin "Complete" action).
  */
-export default function TableSelect({ tables, label = 'Table', selected, onSelect, onStart }) {
+export default function TableSelect({ tables, label = 'Table', selected, occupied = [], onSelect, onStart }) {
+  const occupiedSet = new Set(occupied)
+  const [wrongTable, setWrongTable] = useState('')
+
+  function handleTap(name) {
+    if (occupiedSet.has(name)) {
+      setWrongTable(name)
+      return
+    }
+    setWrongTable('')
+    onSelect(name)
+  }
+
   return (
     <div className="mx-auto flex min-h-[70vh] max-w-md flex-col">
       <motion.div
@@ -22,6 +39,26 @@ export default function TableSelect({ tables, label = 'Table', selected, onSelec
         </p>
       </motion.div>
 
+      {/* "Wrong table" nudge for an occupied table */}
+      <AnimatePresence>
+        {wrongTable && (
+          <motion.div
+            key={wrongTable}
+            role="alert"
+            initial={{ opacity: 0, y: -6, height: 0 }}
+            animate={{ opacity: 1, y: 0, height: 'auto' }}
+            exit={{ opacity: 0, y: -6, height: 0 }}
+            className="mt-4 overflow-hidden"
+          >
+            <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-foreground">
+              🙈 Oops — <span className="font-semibold">{wrongTable}</span> is already busy munching!
+              Looks like you tapped the wrong one. Please pick the number shown on{' '}
+              <span className="font-semibold">your</span> table.
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       <motion.div
         role="radiogroup"
         aria-label="Select your table"
@@ -35,23 +72,27 @@ export default function TableSelect({ tables, label = 'Table', selected, onSelec
       >
         {tables.map((name) => {
           const isSelected = selected === name
+          const isOccupied = occupiedSet.has(name)
           return (
             <motion.button
               key={name}
               type="button"
               role="radio"
               aria-checked={isSelected}
-              onClick={() => onSelect(name)}
+              aria-label={`${name}${isOccupied ? ', in use' : ''}`}
+              onClick={() => handleTap(name)}
               variants={{
                 hidden: { opacity: 0, scale: 0.9 },
                 show: { opacity: 1, scale: 1 },
               }}
               whileTap={{ scale: 0.94 }}
               className={
-                'flex aspect-square flex-col items-center justify-center rounded-xl border-2 p-2 text-center transition-colors ' +
+                'relative flex aspect-square flex-col items-center justify-center rounded-xl border-2 p-2 text-center transition-colors ' +
                 (isSelected
                   ? 'border-brand bg-brand text-brand-foreground shadow-md'
-                  : 'border-input bg-background text-foreground hover:bg-muted')
+                  : isOccupied
+                    ? 'border-dashed border-muted-foreground/30 bg-muted text-muted-foreground'
+                    : 'border-input bg-background text-foreground hover:bg-muted')
               }
             >
               <span
@@ -65,12 +106,17 @@ export default function TableSelect({ tables, label = 'Table', selected, onSelec
               <span className="text-xl font-bold leading-tight tabular-nums">
                 {shortName(name, label)}
               </span>
+              {isOccupied && !isSelected && (
+                <span className="mt-0.5 text-[9px] font-semibold uppercase tracking-wide text-destructive/70">
+                  In use
+                </span>
+              )}
             </motion.button>
           )
         })}
       </motion.div>
 
-      {/* Sticky action — appears once a table is chosen. */}
+      {/* Sticky action — appears once a (free) table is chosen. */}
       <div className="sticky bottom-0 mt-auto -mx-4 bg-gradient-to-t from-muted via-muted px-4 pb-4 pt-6">
         <AnimatePresence mode="wait">
           {selected ? (
