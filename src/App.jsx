@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { motion, AnimatePresence } from 'framer-motion'
+import { motion, AnimatePresence, useReducedMotion } from 'framer-motion'
 import TableSelect from '@/components/TableSelect'
 import CustomerIntakeForm from '@/components/CustomerIntakeForm'
 import MenuSelector from '@/components/MenuSelector'
-import OrderSummary from '@/components/OrderSummary'
+import OrderSummary, { BillBreakdown } from '@/components/OrderSummary'
 import PaymentSelector from '@/components/PaymentSelector'
 import AdminOrdersTable from '@/components/AdminOrdersTable'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, Button } from '@/components/ui/primitives'
@@ -11,8 +11,9 @@ import { loadAllMenus } from '@/lib/menuLoader'
 import { loadTaxConfig, DEFAULT_TAX_CONFIG } from '@/lib/taxConfig'
 import { loadTables, DEFAULT_TABLES } from '@/lib/tablesLoader'
 import { validateName, validatePhone } from '@/lib/validators'
-import { computeOrderBill, formatCurrency } from '@/lib/billing'
-import { saveOrder, updateOrder, getOccupiedTables } from '@/lib/orderStore'
+import { computeOrderBill } from '@/lib/billing'
+import { saveOrder, getOccupiedTables } from '@/lib/orderStore'
+import { createTable, listTables, mergeTableLabels } from '@/lib/tableStore'
 
 export default function App() {
   const [view, setView] = useState('order') // 'order' | 'admin'
@@ -38,7 +39,11 @@ export default function App() {
   return (
     <div className="min-h-screen">
       <Header view={view} setView={goToView} />
-      <main className="mx-auto w-full max-w-3xl px-4 py-6">
+      <main
+        className={
+          'mx-auto w-full px-4 py-6 ' + (view === 'admin' ? 'max-w-none' : 'max-w-3xl')
+        }
+      >
         {view === 'order' ? (
           <OrderFlow
             key={editingOrder ? editingOrder.id : 'new'}
@@ -53,8 +58,13 @@ export default function App() {
           />
         )}
       </main>
-      <footer className="mx-auto max-w-3xl px-4 pb-8 pt-2 text-center text-xs text-muted-foreground">
-        SliceMatic MVP · local-only (localStorage) · Delhi
+      <footer
+        className={
+          'mx-auto px-4 pb-8 pt-2 text-center text-xs text-muted-foreground ' +
+          (view === 'admin' ? 'max-w-none' : 'max-w-3xl')
+        }
+      >
+        SliceMatic MVP · orders via API · Delhi
       </footer>
     </div>
   )
@@ -67,7 +77,12 @@ function Header({ view, setView }) {
   ]
   return (
     <header className="sticky top-0 z-10 border-b border-border bg-background/95 backdrop-blur">
-      <div className="mx-auto flex max-w-3xl items-center justify-between px-4 py-3">
+      <div
+        className={
+          'mx-auto flex items-center justify-between px-4 py-3 ' +
+          (view === 'admin' ? 'max-w-none' : 'max-w-3xl')
+        }
+      >
         <div className="flex items-center gap-2">
           <span className="text-2xl" aria-hidden="true">🍕</span>
           <div>
@@ -135,22 +150,41 @@ function OrderFlow({ editingOrder = null, onDoneEditing }) {
   // Session timestamp captured when the flow starts.
   const sessionStartedAt = useRef(new Date().toISOString())
 
+  async function loadTablesFromApi(cfg) {
+    const apiRows = await listTables()
+    return mergeTableLabels(cfg.tables, apiRows, cfg.label)
+  }
+
   async function load() {
     setLoading(true)
     setLoadError('')
     try {
-      // Menu must load; tax config + tables self-default if their files are bad.
       const [data, cfg, tbl] = await Promise.all([loadAllMenus(), loadTaxConfig(), loadTables()])
       setMenu(data)
       setTaxConfig(cfg)
-      setTables(tbl.tables)
       setTableLabel(tbl.label)
+      setTables(await loadTablesFromApi(tbl))
     } catch (err) {
       setMenu(null)
       setLoadError(err.message || 'Failed to load menu.')
     } finally {
       setLoading(false)
     }
+  }
+
+  async function refreshTablesList() {
+    const cfg = await loadTables()
+    setTableLabel(cfg.label)
+    setTables(await loadTablesFromApi(cfg))
+  }
+
+  async function handleAddTable(tableNumber) {
+    const result = await createTable(tableNumber)
+    if (result.ok) {
+      await refreshTablesList()
+      return { ok: true, label: result.table.label }
+    }
+    return result
   }
 
   useEffect(() => {
@@ -163,17 +197,24 @@ function OrderFlow({ editingOrder = null, onDoneEditing }) {
   const [table, setTable] = useState(editingOrder?.table ?? '')
 
   // Tables with an open (active) order — blocked until admin completes/cancels.
-  const [occupiedTables, setOccupiedTables] = useState(() => getOccupiedTables())
-  const refreshOccupancy = () => setOccupiedTables(getOccupiedTables())
+  const [occupiedTables, setOccupiedTables] = useState([])
+
+  async function refreshOccupancy() {
+    const occupied = await getOccupiedTables()
+    setOccupiedTables(occupied)
+  }
+
+  useEffect(() => {
+    refreshOccupancy()
+  }, [])
 
   // Re-show the table screen (new order / change table), always with fresh occupancy.
   function goToTableStage() {
     refreshOccupancy()
+    refreshTablesList()
     setTable('')
     setStage('table')
   }
-
-  // --- Customer state (seeded from the order being edited) ------------
   const [customer, setCustomer] = useState({
     name: editingOrder?.customerName ?? '',
     phone: editingOrder?.phone ?? '',
@@ -198,6 +239,8 @@ function OrderFlow({ editingOrder = null, onDoneEditing }) {
   const [confirmedMode, setConfirmedMode] = useState('created') // 'created' | 'updated'
   const submittingRef = useRef(false) // synchronous guard vs double-click
   const [submitting, setSubmitting] = useState(false)
+  const [placeOrderOpen, setPlaceOrderOpen] = useState(false)
+  const [placeOrderError, setPlaceOrderError] = useState('')
 
   // Aggregate bill for everything in the cart.
   const orderBill = useMemo(() => computeOrderBill(cart, taxConfig), [cart, taxConfig])
@@ -273,10 +316,8 @@ function OrderFlow({ editingOrder = null, onDoneEditing }) {
     setEditSeed(null)
   }
 
-  // --- Confirm --------------------------------------------------------
-  function handleConfirm() {
-    if (submittingRef.current) return // synchronous double-click guard
-
+  // --- Place order (review popup) then confirm (API) -------------------
+  function validateOrderForm() {
     const nameCheck = validateName(customer.name)
     const phoneCheck = validatePhone(customer.phone)
     const cartEmpty = cart.length === 0
@@ -293,16 +334,36 @@ function OrderFlow({ editingOrder = null, onDoneEditing }) {
         (nameCheck.valid ? '' : 'cust-name') || (phoneCheck.valid ? '' : 'cust-phone')
       const el = focusId && document.getElementById(focusId)
       if (el?.focus) el.focus()
+      return false
+    }
+    return true
+  }
+
+  function handlePlaceOrder() {
+    if (isEditing) {
+      setPaymentError('Order editing is not supported with the server yet.')
       return
     }
+    setPlaceOrderError('')
+    if (!validateOrderForm()) return
+    setPlaceOrderOpen(true)
+  }
+
+  function closePlaceOrderModal() {
+    if (submittingRef.current) return
+    setPlaceOrderOpen(false)
+    setPlaceOrderError('')
+  }
+
+  async function handleConfirmOrder() {
+    if (submittingRef.current) return
 
     submittingRef.current = true
     setSubmitting(true)
+    setPlaceOrderError('')
 
-    // Recompute here so the saved record can never drift from the UI.
     const finalBill = computeOrderBill(cart, taxConfig)
 
-    // The re-billed fields, shared by create and edit paths.
     const payload = {
       table: table || null,
       customerName: customer.name.trim(),
@@ -319,39 +380,48 @@ function OrderFlow({ editingOrder = null, onDoneEditing }) {
         lineTotal: l.total,
       })),
       itemCount: finalBill.lines.length,
-      quantity: finalBill.totalQuantity, // total pizzas across the order
+      quantity: finalBill.totalQuantity,
       subtotal: finalBill.subtotal,
       discount: finalBill.discount,
       gst: finalBill.gst,
       cgst: finalBill.cgst,
       sgst: finalBill.sgst,
-      gstRate: taxConfig.gst.rate, // snapshot the rate that was applied
+      gstRate: taxConfig.gst.rate,
       total: finalBill.total,
       paymentMode: payment,
     }
 
-    // Edit: overwrite the existing record (updateOrder preserves id / orderCode /
-    // orderNumber / timestamp / status). New: create with a fresh id + number.
-    const result = isEditing
-      ? updateOrder({ id: editingOrder.id, ...payload })
-      : saveOrder({
-          timestamp: new Date().toISOString(),
-          sessionStartedAt: sessionStartedAt.current,
-          ...payload,
-        })
+    const result = await saveOrder({
+      timestamp: new Date().toISOString(),
+      sessionStartedAt: sessionStartedAt.current,
+      ...payload,
+    })
 
     setSubmitting(false)
     submittingRef.current = false
 
-    if (result.ok || result.reason === 'duplicate') {
-      setConfirmedMode(isEditing ? 'updated' : 'created')
+    if (result.ok) {
+      setPlaceOrderOpen(false)
+      setConfirmedMode('created')
       setConfirmed(result.order)
+      refreshOccupancy()
     } else {
-      setPaymentError('Could not save the order. Please try again.')
+      setPlaceOrderError(result.message || 'Could not save the order. Please try again.')
     }
   }
 
   function startNewOrder() {
+    resetAfterOrder()
+    goToTableStage()
+    sessionStartedAt.current = new Date().toISOString()
+  }
+
+  function closeReceipt() {
+    resetAfterOrder()
+    goToTableStage()
+  }
+
+  function resetAfterOrder() {
     setCustomer({ name: '', phone: '' })
     setCustErrors({ name: '', phone: '' })
     setTouched({ name: false, phone: false })
@@ -361,9 +431,9 @@ function OrderFlow({ editingOrder = null, onDoneEditing }) {
     setEditSeed(null)
     setPayment('')
     setPaymentError('')
+    setPlaceOrderOpen(false)
+    setPlaceOrderError('')
     setConfirmed(null)
-    goToTableStage()
-    sessionStartedAt.current = new Date().toISOString()
   }
 
   // --- Render ---------------------------------------------------------
@@ -384,10 +454,12 @@ function OrderFlow({ editingOrder = null, onDoneEditing }) {
   }
   if (confirmed) {
     return (
-      <OrderConfirmed
+      <OrderReceiptModal
         order={confirmed}
+        taxConfig={taxConfig}
         mode={confirmedMode}
         onNew={startNewOrder}
+        onClose={closeReceipt}
         onBackToAdmin={onDoneEditing}
       />
     )
@@ -411,6 +483,7 @@ function OrderFlow({ editingOrder = null, onDoneEditing }) {
             occupied={occupiedTables}
             onSelect={setTable}
             onStart={() => setStage('order')}
+            onAddTable={handleAddTable}
           />
         </motion.div>
       </AnimatePresence>
@@ -419,7 +492,20 @@ function OrderFlow({ editingOrder = null, onDoneEditing }) {
 
   // Order-building flow (mobile-first single column).
   return (
-    <motion.div
+    <>
+      <PlaceOrderModal
+        open={placeOrderOpen}
+        bill={orderBill}
+        taxConfig={taxConfig}
+        table={table}
+        customerName={customer.name.trim()}
+        paymentMode={payment}
+        busy={submitting}
+        error={placeOrderError}
+        onCancel={closePlaceOrderModal}
+        onConfirm={handleConfirmOrder}
+      />
+      <motion.div
       key="order"
       initial={{ opacity: 0, x: 24 }}
       animate={{ opacity: 1, x: 0 }}
@@ -488,7 +574,7 @@ function OrderFlow({ editingOrder = null, onDoneEditing }) {
 
       <Card>
         <CardHeader>
-          <CardTitle>Payment &amp; confirm</CardTitle>
+          <CardTitle>Payment</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           <PaymentSelector
@@ -499,22 +585,129 @@ function OrderFlow({ editingOrder = null, onDoneEditing }) {
               setPaymentError('')
             }}
           />
+
           <Button
             className="w-full py-3.5 text-base"
-            onClick={handleConfirm}
+            onClick={handlePlaceOrder}
             disabled={submitting}
           >
-            {submitting
-              ? 'Saving…'
-              : cart.length > 0
-                ? `${isEditing ? 'Save changes' : 'Confirm order'} · ${formatCurrency(orderBill.total)}`
-                : isEditing
-                  ? 'Save changes'
-                  : 'Confirm order'}
+            Place Order
           </Button>
         </CardContent>
       </Card>
     </motion.div>
+    </>
+  )
+}
+
+function PlaceOrderModal({
+  open,
+  bill,
+  taxConfig,
+  table,
+  customerName,
+  paymentMode,
+  busy,
+  error,
+  onCancel,
+  onConfirm,
+}) {
+  const reduceMotion = useReducedMotion()
+  const confirmRef = useRef(null)
+
+  useEffect(() => {
+    if (!open) return
+
+    const onKey = (e) => {
+      if (e.key === 'Escape' && !busy) onCancel()
+    }
+    document.addEventListener('keydown', onKey)
+    document.body.style.overflow = 'hidden'
+    confirmRef.current?.focus()
+
+    return () => {
+      document.removeEventListener('keydown', onKey)
+      document.body.style.overflow = ''
+    }
+  }, [open, busy, onCancel])
+
+  const spring = reduceMotion
+    ? { duration: 0 }
+    : { type: 'spring', stiffness: 420, damping: 32 }
+
+  return (
+    <AnimatePresence>
+      {open && (
+        <motion.div
+          className="fixed inset-0 z-50 flex items-end justify-center p-4 sm:items-center"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: reduceMotion ? 0 : 0.2 }}
+        >
+          <motion.button
+            type="button"
+            aria-label="Close dialog"
+            className="absolute inset-0 bg-foreground/40 backdrop-blur-sm"
+            onClick={busy ? undefined : onCancel}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+          />
+
+          <motion.div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="place-order-title"
+            className="relative z-10 w-full max-w-md overflow-hidden rounded-xl border border-border bg-background shadow-2xl"
+            initial={reduceMotion ? false : { opacity: 0, y: 24, scale: 0.97 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={reduceMotion ? { opacity: 0 } : { opacity: 0, y: 16, scale: 0.98 }}
+            transition={spring}
+          >
+            <div className="border-b border-border bg-gradient-to-br from-brand/10 to-background px-6 pb-5 pt-6">
+              <h2 id="place-order-title" className="text-xl font-bold tracking-tight">
+                Review your order
+              </h2>
+              <p className="mt-1.5 text-sm text-muted-foreground">
+                {table ? `${table} · ` : ''}
+                {customerName}
+                {paymentMode ? ` · ${paymentMode}` : ''}
+              </p>
+            </div>
+
+            <div className="px-6 py-5">
+              <BillBreakdown bill={bill} taxConfig={taxConfig} variant="compact" />
+              {error && (
+                <p role="alert" className="mt-4 text-sm font-medium text-destructive">
+                  {error}
+                </p>
+              )}
+            </div>
+
+            <div className="flex flex-col-reverse gap-2 border-t border-border bg-muted/40 px-6 py-4 sm:flex-row sm:justify-end">
+              <Button
+                variant="outline"
+                className="sm:min-w-[7rem]"
+                onClick={onCancel}
+                disabled={busy}
+              >
+                Cancel
+              </Button>
+              <button
+                ref={confirmRef}
+                type="button"
+                onClick={onConfirm}
+                disabled={busy}
+                className="inline-flex items-center justify-center rounded-md bg-brand px-4 py-2.5 text-sm font-semibold text-brand-foreground transition-colors hover:bg-brand-dark disabled:opacity-50 sm:min-w-[9rem]"
+              >
+                {busy ? 'Saving…' : 'Confirm Order'}
+              </button>
+            </div>
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>
   )
 }
 
@@ -534,58 +727,102 @@ function StatusPanel({ title, tone = 'muted', children }) {
   )
 }
 
-function OrderConfirmed({ order, mode = 'created', onNew, onBackToAdmin }) {
-  const itemCount = order.itemCount ?? order.items?.length ?? 0
+function OrderReceiptModal({ order, taxConfig, mode = 'created', onNew, onClose, onBackToAdmin }) {
+  const reduceMotion = useReducedMotion()
+  const doneRef = useRef(null)
   const updated = mode === 'updated'
+
+  const bill = useMemo(
+    () => ({
+      subtotal: order.subtotal ?? 0,
+      discount: order.discount ?? 0,
+      discountApplied: (order.discount ?? 0) > 0,
+      cgst: order.cgst ?? 0,
+      sgst: order.sgst ?? 0,
+      total: order.total ?? 0,
+      totalQuantity: order.quantity ?? 0,
+    }),
+    [order]
+  )
+
+  useEffect(() => {
+    document.body.style.overflow = 'hidden'
+    doneRef.current?.focus()
+    return () => {
+      document.body.style.overflow = ''
+    }
+  }, [])
+
+  const spring = reduceMotion
+    ? { duration: 0 }
+    : { type: 'spring', stiffness: 420, damping: 32 }
+
   return (
-    <motion.div
-      initial={{ opacity: 0, scale: 0.96 }}
-      animate={{ opacity: 1, scale: 1 }}
-      transition={{ type: 'spring', stiffness: 300, damping: 24 }}
-    >
-      <Card className="mx-auto max-w-md">
-        <CardHeader>
-          <motion.div
-            className="mb-1 text-5xl"
-            aria-hidden="true"
-            initial={{ scale: 0 }}
-            animate={{ scale: 1 }}
-            transition={{ type: 'spring', stiffness: 260, damping: 18, delay: 0.1 }}
-          >
-            ✅
-          </motion.div>
-          <CardTitle>{updated ? 'Order updated' : 'Order confirmed'}</CardTitle>
-          <CardDescription>
-            {order.table ? `${order.table} · ` : ''}
-            {order.customerName} · {order.paymentMode}
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          {order.orderCode && (
-            <div className="flex items-center justify-between rounded-md border border-brand/30 bg-brand/5 px-4 py-3">
-              <span className="text-sm text-muted-foreground">Order ID</span>
-              <span className="font-mono text-lg font-bold tracking-wide text-brand-dark">
-                {order.orderCode}
-              </span>
-            </div>
-          )}
-          <div className="rounded-md bg-muted p-4">
-            <div className="flex items-center justify-between">
-              <span className="text-sm text-muted-foreground">Amount paid</span>
-              <span className="text-2xl font-extrabold text-brand-dark">
-                {formatCurrency(order.total)}
-              </span>
-            </div>
-            <p className="mt-1 text-xs text-muted-foreground">
-              {itemCount} pizza type{itemCount === 1 ? '' : 's'} · {order.quantity}{' '}
-              pizza{order.quantity === 1 ? '' : 's'} total
+    <AnimatePresence>
+      <motion.div
+        className="fixed inset-0 z-50 flex items-end justify-center p-4 sm:items-center"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        transition={{ duration: reduceMotion ? 0 : 0.2 }}
+      >
+        <div className="absolute inset-0 bg-foreground/40 backdrop-blur-sm" aria-hidden="true" />
+
+        <motion.div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="receipt-title"
+          className="relative z-10 w-full max-w-md overflow-hidden rounded-xl border border-border bg-background shadow-2xl"
+          initial={reduceMotion ? false : { opacity: 0, y: 28, scale: 0.97 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          transition={spring}
+        >
+          <div className="border-b border-border bg-gradient-to-br from-brand/10 to-background px-6 pb-5 pt-6 text-center">
+            <motion.div
+              className="mx-auto mb-3 text-5xl"
+              aria-hidden="true"
+              initial={{ scale: 0 }}
+              animate={{ scale: 1 }}
+              transition={{ type: 'spring', stiffness: 260, damping: 18, delay: 0.05 }}
+            >
+              ✅
+            </motion.div>
+            <h2 id="receipt-title" className="text-xl font-bold tracking-tight">
+              {updated ? 'Order updated' : 'Order confirmed'}
+            </h2>
+            <p className="mt-1 text-sm text-muted-foreground">
+              {order.table ? `${order.table} · ` : ''}
+              {order.customerName} · {order.paymentMode}
             </p>
+            {order.orderCode && (
+              <p className="mt-3 font-mono text-lg font-bold tracking-wide text-brand-dark">
+                {order.orderCode}
+              </p>
+            )}
           </div>
-          <Button className="w-full" onClick={updated ? onBackToAdmin : onNew}>
-            {updated ? 'Back to orders' : 'New order'}
-          </Button>
-        </CardContent>
-      </Card>
-    </motion.div>
+
+          <div className="px-6 py-5">
+            <p className="mb-3 text-sm font-semibold">Tax invoice</p>
+            <BillBreakdown bill={bill} taxConfig={taxConfig} />
+          </div>
+
+          <div className="flex flex-col-reverse gap-2 border-t border-border bg-muted/40 px-6 py-4 sm:flex-row sm:justify-end">
+            {!updated && (
+              <Button variant="outline" className="sm:min-w-[7rem]" onClick={onClose}>
+                Close
+              </Button>
+            )}
+            <button
+              ref={doneRef}
+              type="button"
+              onClick={updated ? onBackToAdmin : onNew}
+              className="inline-flex items-center justify-center rounded-md bg-brand px-4 py-3 text-sm font-semibold text-brand-foreground transition-colors hover:bg-brand-dark sm:min-w-[9rem]"
+            >
+              {updated ? 'Back to orders' : 'New order'}
+            </button>
+          </div>
+        </motion.div>
+      </motion.div>
+    </AnimatePresence>
   )
 }

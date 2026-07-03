@@ -1,9 +1,85 @@
 import { motion, AnimatePresence } from 'framer-motion'
 import { Card, CardHeader, CardTitle, CardContent, Table, THead, TH, TR, TD, FieldError } from '@/components/ui/primitives'
-import { formatCurrency } from '@/lib/billing'
+import { formatCurrency, round2 } from '@/lib/billing'
 import { DEFAULT_TAX_CONFIG } from '@/lib/taxConfig'
 
 const pct = (r) => `${+(r * 100).toFixed(2)}%`
+
+/** Shared itemised bill rows — used in cart summary, payment step, and receipt popup. */
+export function BillBreakdown({
+  bill,
+  taxConfig = DEFAULT_TAX_CONFIG,
+  className = '',
+  variant = 'full',
+}) {
+  const { gst } = taxConfig
+  const taxable = round2(bill.subtotal - bill.discount)
+
+  if (variant === 'compact') {
+    return (
+      <dl className={`space-y-3 text-sm ${className}`}>
+        <div className="flex items-center justify-between">
+          <dt className="text-muted-foreground">Price (before GST)</dt>
+          <dd className="font-semibold tabular-nums">{formatCurrency(taxable)}</dd>
+        </div>
+        <div className="flex items-center justify-between">
+          <dt className="text-muted-foreground">CGST ({pct(gst.cgst)})</dt>
+          <dd className="font-semibold tabular-nums">{formatCurrency(bill.cgst)}</dd>
+        </div>
+        <div className="flex items-center justify-between">
+          <dt className="text-muted-foreground">SGST ({pct(gst.sgst)})</dt>
+          <dd className="font-semibold tabular-nums">{formatCurrency(bill.sgst)}</dd>
+        </div>
+        <div className="flex items-center justify-between border-t border-border pt-3">
+          <dt className="text-base font-bold">Total</dt>
+          <dd className="text-lg font-extrabold tabular-nums text-brand-dark">
+            {formatCurrency(bill.total)}
+          </dd>
+        </div>
+      </dl>
+    )
+  }
+
+  return (
+    <div className={className}>
+      <Table>
+        <THead>
+          <TR>
+            <TH>Bill</TH>
+            <TH className="text-right">Amount</TH>
+          </TR>
+        </THead>
+        <tbody>
+          <LineRow
+            label={`Subtotal (${bill.totalQuantity} pizza${bill.totalQuantity === 1 ? '' : 's'})`}
+            value={bill.subtotal}
+            strong
+          />
+          {bill.discountApplied && (
+            <LineRow
+              label={`Discount (${pct(taxConfig.discount.rate)} — order of ${taxConfig.discount.minQuantity}+ pizzas)`}
+              value={-bill.discount}
+              className="text-brand-dark"
+            />
+          )}
+          <LineRow label="Price (before GST)" value={taxable} />
+          <LineRow label={`CGST (${pct(gst.cgst)})`} value={bill.cgst} />
+          <LineRow label={`SGST (${pct(gst.sgst)})`} value={bill.sgst} />
+          <TR className="border-t-2 border-foreground/20">
+            <TD className="py-3 text-base font-bold">Total (incl. GST)</TD>
+            <TD className="py-3 text-right text-lg font-extrabold tabular-nums text-brand-dark">
+              {formatCurrency(bill.total)}
+            </TD>
+          </TR>
+        </tbody>
+      </Table>
+      <p className="mt-2 text-xs text-muted-foreground">
+        {gst.label} {pct(gst.rate)} on the post-discount amount
+        {gst.inputTaxCredit ? '' : ' · no input tax credit'}.
+      </p>
+    </div>
+  )
+}
 
 /**
  * The order (cart). Lists every combo added, each with an inline quantity
@@ -13,7 +89,6 @@ const pct = (r) => `${+(r * 100).toFixed(2)}%`
  */
 export default function OrderSummary({ order, taxConfig = DEFAULT_TAX_CONFIG, onUpdateQty, onRemove, onEdit, editingLineId = '', error }) {
   const hasItems = order && order.lines.length > 0
-  const { gst } = taxConfig
 
   return (
     <Card>
@@ -100,41 +175,7 @@ export default function OrderSummary({ order, taxConfig = DEFAULT_TAX_CONFIG, on
               </AnimatePresence>
             </ul>
 
-            {/* Aggregate itemised bill for the whole order */}
-            <Table>
-              <THead>
-                <TR>
-                  <TH>Bill</TH>
-                  <TH className="text-right">Amount</TH>
-                </TR>
-              </THead>
-              <tbody>
-                <LineRow
-                  label={`Subtotal (${order.totalQuantity} pizza${order.totalQuantity === 1 ? '' : 's'})`}
-                  value={order.subtotal}
-                  strong
-                />
-                {order.discountApplied && (
-                  <LineRow
-                    label={`Discount (${pct(taxConfig.discount.rate)} — order of ${taxConfig.discount.minQuantity}+ pizzas)`}
-                    value={-order.discount}
-                    className="text-brand-dark"
-                  />
-                )}
-                <LineRow label={`CGST (${pct(gst.cgst)})`} value={order.cgst} />
-                <LineRow label={`SGST (${pct(gst.sgst)})`} value={order.sgst} />
-                <TR className="border-t-2 border-foreground/20">
-                  <TD className="py-3 text-base font-bold">Total payable</TD>
-                  <TD className="py-3 text-right text-lg font-extrabold tabular-nums text-brand-dark">
-                    {formatCurrency(order.total)}
-                  </TD>
-                </TR>
-              </tbody>
-            </Table>
-            <p className="text-xs text-muted-foreground">
-              {gst.label} {pct(gst.rate)} on the post-discount amount
-              {gst.inputTaxCredit ? '' : ' · no input tax credit'}.
-            </p>
+            <BillBreakdown bill={order} taxConfig={taxConfig} />
           </>
         )}
       </CardContent>
