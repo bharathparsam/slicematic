@@ -1,11 +1,15 @@
 import { useState } from 'react'
-import { motion, AnimatePresence } from 'framer-motion'
+import { motion, AnimatePresence, useReducedMotion } from 'framer-motion'
 import { Button } from '@/components/ui/primitives'
 
 /**
- * Landing screen — "select your table". A tappable grid of tables read from
- * config (tablesLoader). Pick one, then the Order button slides up to start the
- * flow. Mobile-first: big tap targets, single sticky action.
+ * Landing screen — "select your table". A warm hero (inline SVG mark + serif
+ * wordmark) over a soft gradient, then a tappable grid of tables read from
+ * config (tablesLoader). Pick a free table → the Order button slides up.
+ *
+ * Design: culinary/hospitality warmth on the existing orange brand, restrained
+ * (one hero panel, one glow, tasteful press/hover). Fully offline — system serif
+ * + inline SVG, no external fonts or images. Respects prefers-reduced-motion.
  *
  * Tables with an open order (`occupied`) are blocked: tapping one shows a light
  * "wrong table" nudge instead of selecting it, until an admin completes/cancels
@@ -14,6 +18,9 @@ import { Button } from '@/components/ui/primitives'
 export default function TableSelect({ tables, label = 'Table', selected, occupied = [], onSelect, onStart }) {
   const occupiedSet = new Set(occupied)
   const [wrongTable, setWrongTable] = useState('')
+  const reduce = useReducedMotion()
+
+  const freeCount = tables.filter((t) => !occupiedSet.has(t)).length
 
   function handleTap(name) {
     if (occupiedSet.has(name)) {
@@ -26,18 +33,38 @@ export default function TableSelect({ tables, label = 'Table', selected, occupie
 
   return (
     <div className="mx-auto flex min-h-[70vh] max-w-md flex-col">
-      <motion.div
-        initial={{ opacity: 0, y: 8 }}
+      {/* Hero */}
+      <motion.section
+        initial={reduce ? false : { opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.3 }}
-        className="pt-2 text-center"
+        transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
+        className="relative overflow-hidden rounded-3xl border border-orange-100 bg-gradient-to-br from-orange-50 via-amber-50 to-background px-6 py-9 text-center shadow-sm"
       >
-        <div className="mb-2 text-4xl" aria-hidden="true">🍕</div>
-        <h2 className="text-2xl font-extrabold tracking-tight">Welcome to SliceMatic</h2>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Tap your table to start your order.
-        </p>
-      </motion.div>
+        {/* soft warm glow behind the mark */}
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute -top-14 left-1/2 h-36 w-36 -translate-x-1/2 rounded-full bg-brand/25 blur-3xl"
+        />
+        <div className="relative">
+          <PizzaMark className="mx-auto h-14 w-14 drop-shadow-sm" />
+          <h2 className="mt-3 font-serif text-4xl font-bold leading-none tracking-tight text-brand-dark">
+            SliceMatic
+          </h2>
+          <p className="mt-2 text-sm text-muted-foreground">
+            Hand-tossed, made to order · Delhi
+          </p>
+        </div>
+      </motion.section>
+
+      {/* Section label + free count */}
+      <div className="mb-3 mt-8 flex items-baseline justify-between">
+        <h3 className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+          Select your table
+        </h3>
+        <span className="text-xs font-medium tabular-nums text-muted-foreground">
+          {freeCount} free
+        </span>
+      </div>
 
       {/* "Wrong table" nudge for an occupied table */}
       <AnimatePresence>
@@ -45,30 +72,31 @@ export default function TableSelect({ tables, label = 'Table', selected, occupie
           <motion.div
             key={wrongTable}
             role="alert"
-            initial={{ opacity: 0, y: -6, height: 0 }}
+            initial={reduce ? { opacity: 0 } : { opacity: 0, y: -6, height: 0 }}
             animate={{ opacity: 1, y: 0, height: 'auto' }}
-            exit={{ opacity: 0, y: -6, height: 0 }}
-            className="mt-4 overflow-hidden"
+            exit={reduce ? { opacity: 0 } : { opacity: 0, y: -6, height: 0 }}
+            className="mb-3 overflow-hidden"
           >
-            <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-foreground">
-              🙈 Oops — <span className="font-semibold">{wrongTable}</span> is already busy munching!
-              Looks like you tapped the wrong one. Please pick the number shown on{' '}
-              <span className="font-semibold">your</span> table.
+            <div className="flex items-start gap-2.5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+              <WrongTableIcon className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
+              <span>
+                Oops — <span className="font-semibold">{wrongTable}</span> is already munching!
+                Looks like you tapped the wrong one. Please pick the number shown on{' '}
+                <span className="font-semibold">your</span> table.
+              </span>
             </div>
           </motion.div>
         )}
       </AnimatePresence>
 
+      {/* Table grid */}
       <motion.div
         role="radiogroup"
         aria-label="Select your table"
-        className="mt-6 grid grid-cols-3 gap-3"
-        initial="hidden"
+        className="grid grid-cols-3 gap-3"
+        initial={reduce ? false : 'hidden'}
         animate="show"
-        variants={{
-          hidden: {},
-          show: { transition: { staggerChildren: 0.03 } },
-        }}
+        variants={{ hidden: {}, show: { transition: { staggerChildren: 0.025 } } }}
       >
         {tables.map((name) => {
           const isSelected = selected === name
@@ -81,34 +109,41 @@ export default function TableSelect({ tables, label = 'Table', selected, occupie
               aria-checked={isSelected}
               aria-label={`${name}${isOccupied ? ', in use' : ''}`}
               onClick={() => handleTap(name)}
-              variants={{
-                hidden: { opacity: 0, scale: 0.9 },
-                show: { opacity: 1, scale: 1 },
-              }}
-              whileTap={{ scale: 0.94 }}
+              variants={{ hidden: { opacity: 0, scale: 0.92 }, show: { opacity: 1, scale: 1 } }}
+              whileTap={isOccupied ? undefined : { scale: 0.95 }}
               className={
-                'relative flex aspect-square flex-col items-center justify-center rounded-xl border-2 p-2 text-center transition-colors ' +
+                'group relative flex aspect-square cursor-pointer flex-col items-center justify-center rounded-2xl border p-2 text-center transition-all duration-200 motion-reduce:transition-none ' +
                 (isSelected
-                  ? 'border-brand bg-brand text-brand-foreground shadow-md'
+                  ? 'border-transparent bg-gradient-to-br from-brand to-brand-dark text-brand-foreground shadow-lg shadow-brand/25'
                   : isOccupied
-                    ? 'border-dashed border-muted-foreground/30 bg-muted text-muted-foreground'
-                    : 'border-input bg-background text-foreground hover:bg-muted')
+                    ? 'border-dashed border-muted-foreground/25 bg-muted/60 text-muted-foreground'
+                    : 'border-border bg-background text-foreground shadow-sm hover:-translate-y-0.5 hover:border-brand/40 hover:shadow-md motion-reduce:hover:translate-y-0')
               }
             >
+              {isSelected && (
+                <motion.span
+                  initial={reduce ? false : { scale: 0 }}
+                  animate={{ scale: 1 }}
+                  transition={{ type: 'spring', stiffness: 500, damping: 22 }}
+                  className="absolute right-1.5 top-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-white/25"
+                >
+                  <CheckIcon className="h-3 w-3 text-brand-foreground" />
+                </motion.span>
+              )}
               <span
                 className={
-                  'text-[10px] font-medium uppercase tracking-wide ' +
+                  'text-[10px] font-medium uppercase tracking-wider ' +
                   (isSelected ? 'text-brand-foreground/80' : 'text-muted-foreground')
                 }
               >
                 {label}
               </span>
-              <span className="text-xl font-bold leading-tight tabular-nums">
+              <span className="font-serif text-2xl font-bold leading-tight tabular-nums">
                 {shortName(name, label)}
               </span>
               {isOccupied && !isSelected && (
-                <span className="mt-0.5 text-[9px] font-semibold uppercase tracking-wide text-destructive/70">
-                  In use
+                <span className="mt-0.5 inline-flex items-center gap-0.5 text-[9px] font-semibold uppercase tracking-wide text-amber-600">
+                  <DotIcon className="h-1.5 w-1.5" /> In use
                 </span>
               )}
             </motion.button>
@@ -122,13 +157,17 @@ export default function TableSelect({ tables, label = 'Table', selected, occupie
           {selected ? (
             <motion.div
               key="go"
-              initial={{ opacity: 0, y: 16 }}
+              initial={reduce ? { opacity: 0 } : { opacity: 0, y: 16 }}
               animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: 16 }}
+              exit={reduce ? { opacity: 0 } : { opacity: 0, y: 16 }}
               transition={{ type: 'spring', stiffness: 400, damping: 30 }}
             >
-              <Button className="w-full py-3.5 text-base" onClick={onStart}>
-                Order for {selected} →
+              <Button
+                className="w-full bg-gradient-to-r from-brand to-brand-dark py-3.5 text-base shadow-lg shadow-brand/25 hover:from-brand-dark hover:to-brand-dark"
+                onClick={onStart}
+              >
+                Order for {selected}
+                <ArrowIcon className="h-4 w-4" />
               </Button>
             </motion.div>
           ) : (
@@ -139,7 +178,7 @@ export default function TableSelect({ tables, label = 'Table', selected, occupie
               exit={{ opacity: 0 }}
               className="py-2 text-center text-sm text-muted-foreground"
             >
-              Select a table above to continue.
+              Tap a table above to continue.
             </motion.p>
           )}
         </AnimatePresence>
@@ -152,4 +191,54 @@ export default function TableSelect({ tables, label = 'Table', selected, occupie
 function shortName(name, label) {
   const prefix = `${label} `
   return name.startsWith(prefix) ? name.slice(prefix.length) : name
+}
+
+/* --------------------------------- Icons -------------------------------- */
+/** Brand mark — a warm inline pizza slice (offline, scalable, themeable). */
+function PizzaMark({ className }) {
+  return (
+    <svg viewBox="0 0 64 64" className={className} aria-hidden="true" focusable="false">
+      {/* crust */}
+      <path d="M6 17c8-7 44-7 52 0-8 6-44 6-52 0z" fill="#C2410C" />
+      {/* cheese slice */}
+      <path d="M8.5 18.5c7.4 4.6 39.6 4.6 47 0L32 58 8.5 18.5z" fill="#FBBF24" />
+      {/* pepperoni */}
+      <circle cx="25" cy="28" r="3.4" fill="#DC2626" />
+      <circle cx="40" cy="30" r="3.4" fill="#DC2626" />
+      <circle cx="32" cy="43" r="3" fill="#DC2626" />
+    </svg>
+  )
+}
+
+function CheckIcon({ className }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className={className} aria-hidden="true">
+      <path d="M5 13l4 4L19 7" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
+function ArrowIcon({ className }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className={className} aria-hidden="true">
+      <path d="M5 12h14M13 6l6 6-6 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
+function WrongTableIcon({ className }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className={className} aria-hidden="true">
+      <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2" />
+      <path d="M12 7v6M12 16.5v.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  )
+}
+
+function DotIcon({ className }) {
+  return (
+    <svg viewBox="0 0 8 8" className={className} aria-hidden="true">
+      <circle cx="4" cy="4" r="4" fill="currentColor" />
+    </svg>
+  )
 }
