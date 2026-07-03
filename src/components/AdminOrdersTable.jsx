@@ -131,6 +131,7 @@ export default function AdminOrdersTable({ onModify, unlocked, onUnlock }) {
           <Table>
             <THead>
               <TR>
+                <TH>Actions</TH>
                 <TH>Order ID</TH>
                 <TH>Status</TH>
                 <TH>Table</TH>
@@ -140,7 +141,6 @@ export default function AdminOrdersTable({ onModify, unlocked, onUnlock }) {
                 <TH className="text-right">Total</TH>
                 <TH>Payment</TH>
                 <TH>Time</TH>
-                <TH className="text-right">Actions</TH>
               </TR>
             </THead>
             <tbody>
@@ -150,6 +150,35 @@ export default function AdminOrdersTable({ onModify, unlocked, onUnlock }) {
                 const active = !cancelled && !completed
                 return (
                   <TR key={o.id} className={active ? '' : 'opacity-60'}>
+                    <TD>
+                      {active ? (
+                        <div className="flex flex-col items-start gap-1">
+                          <button
+                            type="button"
+                            onClick={() => handleComplete(o)}
+                            className="w-full rounded px-2 py-1 text-left text-xs font-semibold text-green-700 hover:bg-green-100"
+                          >
+                            Complete
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => onModify?.(o)}
+                            className="w-full rounded px-2 py-1 text-left text-xs font-semibold text-brand-dark hover:bg-brand/10"
+                          >
+                            Modify
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleCancel(o)}
+                            className="w-full rounded px-2 py-1 text-left text-xs font-semibold text-destructive hover:bg-destructive/10"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">—</span>
+                      )}
+                    </TD>
                     <TD className="whitespace-nowrap font-mono text-xs font-semibold text-brand-dark">
                       {o.orderCode || '—'}
                     </TD>
@@ -177,35 +206,6 @@ export default function AdminOrdersTable({ onModify, unlocked, onUnlock }) {
                     <TD className="whitespace-nowrap text-xs text-muted-foreground">
                       {formatTime(o.timestamp)}
                       {o.updatedAt && <div className="text-[10px]">edited</div>}
-                    </TD>
-                    <TD className="text-right">
-                      {active ? (
-                        <div className="flex justify-end gap-1">
-                          <button
-                            type="button"
-                            onClick={() => handleComplete(o)}
-                            className="rounded px-2 py-1 text-xs font-semibold text-green-700 hover:bg-green-100"
-                          >
-                            Complete
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => onModify?.(o)}
-                            className="rounded px-2 py-1 text-xs font-semibold text-brand-dark hover:bg-brand/10"
-                          >
-                            Modify
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleCancel(o)}
-                            className="rounded px-2 py-1 text-xs font-semibold text-destructive hover:bg-destructive/10"
-                          >
-                            Cancel
-                          </button>
-                        </div>
-                      ) : (
-                        <span className="text-xs text-muted-foreground">—</span>
-                      )}
                     </TD>
                   </TR>
                 )
