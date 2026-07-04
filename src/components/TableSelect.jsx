@@ -131,7 +131,7 @@ export default function TableSelect({
 
   return (
     <div
-      className="relative mx-auto w-full max-w-[460px] rounded-3xl shadow-[0_0_60px_rgba(120,70,20,0.12)]"
+      className="relative min-h-screen w-full"
       style={{ background: C.cream, color: C.ink, fontFamily: FONT_BODY }}
     >
       <NewTableModal
@@ -151,13 +151,14 @@ export default function TableSelect({
 
       {/* TOP BAR */}
       <div
-        className="sticky top-0 z-40 flex items-center justify-between rounded-t-3xl px-5 py-3.5"
+        className="sticky top-0 z-40 border-b"
         style={{
           background: 'rgba(251,245,234,0.92)',
           backdropFilter: 'blur(8px)',
-          borderBottom: `1px solid ${C.border}`,
+          borderColor: C.border,
         }}
       >
+        <div className="mx-auto flex w-full max-w-[1600px] items-center justify-between px-5 py-3.5 lg:px-8">
         <div className="flex items-center gap-2.5">
           <div
             className="flex h-9 w-9 items-center justify-center rounded-xl"
@@ -204,10 +205,15 @@ export default function TableSelect({
             {open ? 'Open' : 'Closed'}
           </div>
         </div>
+        </div>
       </div>
 
+      <div className="mx-auto w-full max-w-[1600px] px-5 lg:px-8">
+        <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_minmax(380px,480px)] xl:grid-cols-[minmax(0,1.1fr)_minmax(420px,520px)]">
+          {/* LEFT — hero + how it works */}
+          <div>
       {/* HERO */}
-      <motion.section className="px-5 pb-7 pt-6" {...enter(0)}>
+      <motion.section className="pb-7 pt-6" {...enter(0)}>
         <div
           className="relative overflow-hidden rounded-[22px]"
           style={{
@@ -282,10 +288,10 @@ export default function TableSelect({
       </motion.section>
 
       {/* HOW IT WORKS */}
-      <motion.section className="px-5 pb-7 pt-1.5" {...enter(1)}>
+      <motion.section className="pb-7 pt-1.5" {...enter(1)}>
         <Eyebrow>How it works</Eyebrow>
         <SectionTitle>Three taps to a hot pizza</SectionTitle>
-        <div className="flex flex-col gap-3">
+        <div className="grid gap-3 sm:grid-cols-3">
           {STEPS.map((s) => (
             <div
               key={s.n}
@@ -313,10 +319,13 @@ export default function TableSelect({
           ))}
         </div>
       </motion.section>
+          </div>
 
+          {/* RIGHT — featured menu + table pick */}
+          <div className="pb-32 lg:pb-8">
       {/* FEATURED MENU (real pizzas from the loaded menu) */}
       {featured.length > 0 && (
-        <motion.section className="px-5 pb-7 pt-1.5" {...enter(2)}>
+        <motion.section className="pb-7 pt-6 lg:pt-2" {...enter(2)}>
           <Eyebrow>On the wall today</Eyebrow>
           <SectionTitle className="mb-4">Crowd favourites</SectionTitle>
           <div className="flex flex-col gap-3.5">
@@ -379,7 +388,7 @@ export default function TableSelect({
       {/* TABLE SELECT */}
       <motion.section
         id="tables"
-        className="px-5 pb-6 pt-1.5"
+        className="pb-6 pt-1.5"
         style={{ scrollMarginTop: 70 }}
         {...enter(3)}
       >
@@ -431,7 +440,7 @@ export default function TableSelect({
         <motion.div
           role="radiogroup"
           aria-label="Select your table"
-          className="grid grid-cols-3 gap-3"
+          className="grid grid-cols-3 gap-3 sm:grid-cols-4 lg:grid-cols-3 xl:grid-cols-4"
           initial={reduce ? false : 'hidden'}
           animate="show"
           variants={{ hidden: {}, show: { transition: { staggerChildren: 0.02 } } }}
@@ -521,7 +530,7 @@ export default function TableSelect({
 
       {/* FOOTER */}
       <footer
-        className="px-5 pb-32 pt-6 text-center"
+        className="pb-6 pt-6 text-center lg:hidden"
         style={{ borderTop: `1px solid ${C.border2}`, marginTop: 10 }}
       >
         <div style={{ fontFamily: FONT_DISPLAY, fontSize: 16, color: C.ink }}>SliceMatic</div>
@@ -529,15 +538,19 @@ export default function TableSelect({
           Open daily · 11am – 11pm · Delhi
         </div>
       </footer>
+          </div>
+        </div>
+      </div>
 
       {/* STICKY ORDER BAR — appears once a (free) table is chosen. */}
-      <div className="sticky bottom-0 z-[60] -mt-24 rounded-b-3xl px-4 pb-4 pt-6">
-        <div
-          className="pointer-events-none absolute inset-0 rounded-b-3xl"
-          style={{ background: `linear-gradient(rgba(251,245,234,0), ${C.cream} 40%)` }}
-          aria-hidden="true"
-        />
-        <AnimatePresence mode="wait">
+      <div className="sticky bottom-0 z-[60] px-4 pb-4 pt-6 lg:px-8">
+        <div className="relative mx-auto w-full max-w-[1600px]">
+          <div
+            className="pointer-events-none absolute inset-x-0 bottom-0 h-24"
+            style={{ background: `linear-gradient(rgba(251,245,234,0), ${C.cream} 40%)` }}
+            aria-hidden="true"
+          />
+          <AnimatePresence mode="wait">
           {selected ? (
             <motion.div
               key="go"
@@ -574,7 +587,8 @@ export default function TableSelect({
               Tap a table above to continue.
             </motion.p>
           )}
-        </AnimatePresence>
+          </AnimatePresence>
+        </div>
       </div>
     </div>
   )

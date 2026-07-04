@@ -15,7 +15,7 @@ const FILTERS = [
 ]
 
 // Orders table column template (kept in sync between the header + body rows).
-const GRID = '96px 100px 72px 1.3fr 1.8fr 48px 108px 66px 168px'
+const GRID = '96px 100px 72px minmax(120px,1.2fr) minmax(180px,2fr) 48px 108px 66px minmax(168px,1fr)'
 
 export default function AdminOrdersTable({ onModify, onExit, unlocked, onUnlock }) {
   const [pw, setPw] = useState('')
@@ -112,11 +112,10 @@ export default function AdminOrdersTable({ onModify, onExit, unlocked, onUnlock 
   const todayAvgN = todays.length ? todaySalesN / todays.length : 0
 
   return (
-    <div className="min-h-screen w-full" style={{ background: '#efe4d0' }}>
-      <div
-        className="mx-auto flex min-h-screen w-full max-w-[1280px] flex-col"
-        style={{ background: '#faf3e6', color: C.ink, boxShadow: '0 0 80px rgba(120,70,20,0.1)' }}
-      >
+    <div
+      className="flex min-h-screen w-full flex-col"
+      style={{ background: '#faf3e6', color: C.ink }}
+    >
         <AdminConfirmModal
           order={confirmOrder}
           tone="complete"
@@ -168,7 +167,6 @@ export default function AdminOrdersTable({ onModify, onExit, unlocked, onUnlock 
             )}
           </div>
         )}
-      </div>
     </div>
   )
 }
@@ -412,7 +410,7 @@ function OrdersPanel({
         style={{ background: '#fff', border: `1px solid ${C.border}`, boxShadow: `0 4px 0 ${C.border}` }}
       >
         <div className="overflow-x-auto">
-          <div style={{ minWidth: 980 }}>
+          <div className="w-full min-w-[980px]">
             {/* header */}
             <div
               className="grid items-center gap-3.5 px-6 py-4 uppercase"
