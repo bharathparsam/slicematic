@@ -3,7 +3,17 @@ import { formatCurrency } from '@/lib/billing'
 import CustomizeSheet from './CustomizeSheet'
 import CartSheet from './CartSheet'
 import ReviewModal from './ReviewModal'
+import PizzaLoader from './PizzaLoader'
 import { C, FONT_DISPLAY, FONT_MONO, shortName } from './theme'
+
+// Contextual, order-specific quips for the "saving" moment.
+const SAVING_QUIPS = [
+  'Sending your order to the kitchen…',
+  'Telling the chef to fire it up…',
+  'Reserving your slice of the oven…',
+  'Rolling out your pizzas…',
+  'Almost plated…',
+]
 
 /**
  * The order-building screen (post table selection), redesigned to the "SliceMatic
@@ -270,6 +280,14 @@ export default function OrderScreen({
         onCancel={() => setShowReview(false)}
         onConfirm={handleConfirm}
       />
+
+      {/* Saving overlay — covers everything (incl. the review modal) while the
+          order is being saved, then hands off to the success screen. */}
+      {submitting && (
+        <div className="fixed inset-0 z-[65] flex items-center justify-center" style={{ background: C.cream }}>
+          <PizzaLoader variant="inline" quips={SAVING_QUIPS} />
+        </div>
+      )}
     </div>
   )
 }

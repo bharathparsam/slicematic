@@ -7,6 +7,7 @@ import {
 } from '@/lib/analyticsStore'
 import { formatCurrency } from '@/lib/billing'
 import { C, FONT_DISPLAY, FONT_MONO } from '@/components/order/theme'
+import PizzaLoader from '@/components/order/PizzaLoader'
 
 /** Compact rupees for summary figures (KPIs, bars) — matches the admin comp. */
 function money0(n) {
@@ -152,9 +153,7 @@ export default function AdminAnalytics() {
           <PanelSub>Hourly trend · last 7 days</PanelSub>
           <div className="mt-4">
             {loading && hourly.length === 0 ? (
-              <p className="py-16 text-center" style={{ fontSize: 14, color: C.brown2 }}>
-                Loading chart…
-              </p>
+              <PizzaLoader variant="inline" />
             ) : hourly.length === 0 ? (
               <EmptyNote />
             ) : (

@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import TableSelect from '@/components/TableSelect'
 import OrderScreen from '@/components/order/OrderScreen'
 import DoneScreen from '@/components/order/DoneScreen'
+import PizzaLoader from '@/components/order/PizzaLoader'
 import AdminOrdersTable from '@/components/AdminOrdersTable'
 import { Button } from '@/components/ui/primitives'
 import { loadAllMenus } from '@/lib/menuLoader'
@@ -11,7 +12,7 @@ import { loadTables, DEFAULT_TABLES } from '@/lib/tablesLoader'
 import { validateName, validatePhone } from '@/lib/validators'
 import { computeOrderBill } from '@/lib/billing'
 import { saveOrder, updateOrder, getOccupiedTables } from '@/lib/orderStore'
-import { createTable, listTables, mergeTableLabels } from '@/lib/tableStore'
+import { listTables, mergeTableLabels } from '@/lib/tableStore'
 import { getSession, onAuthChange } from '@/lib/auth'
 
 export default function App() {
@@ -158,15 +159,6 @@ function OrderFlow({ editingOrder = null, onDoneEditing, onAdmin }) {
     const cfg = await loadTables()
     setTableLabel(cfg.label)
     setTables(await loadTablesFromApi(cfg))
-  }
-
-  async function handleAddTable(tableNumber) {
-    const result = await createTable(tableNumber)
-    if (result.ok) {
-      await refreshTablesList()
-      return { ok: true, label: result.table.label }
-    }
-    return result
   }
 
   useEffect(() => {
@@ -360,7 +352,7 @@ function OrderFlow({ editingOrder = null, onDoneEditing, onAdmin }) {
 
   // --- Render ---------------------------------------------------------
   if (loading) {
-    return <StatusPanel title="Good things take time…" tone="muted" />
+    return <PizzaLoader />
   }
   if (loadError) {
     return (
@@ -405,7 +397,6 @@ function OrderFlow({ editingOrder = null, onDoneEditing, onAdmin }) {
             menu={menu}
             onSelect={setTable}
             onStart={() => setStage('order')}
-            onAddTable={handleAddTable}
             onAdmin={onAdmin}
           />
         </motion.div>

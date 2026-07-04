@@ -1,6 +1,5 @@
-import { useEffect, useRef, useState } from 'react'
+import { useState } from 'react'
 import { motion, AnimatePresence, useReducedMotion } from 'framer-motion'
-import { Button, Input, Label, FieldError } from '@/components/ui/primitives'
 import { formatCurrency } from '@/lib/billing'
 
 /**
@@ -18,9 +17,9 @@ import { formatCurrency } from '@/lib/billing'
  * index.html and degrade to system serif / sans / mono when offline.
  *
  * Behaviour preserved from the previous version: tables with an open order
- * (`occupied`) are blocked with a light "wrong table" nudge; add-table opens the
- * same NewTableModal; radiogroup semantics, keyboard focus and
- * prefers-reduced-motion are all respected.
+ * (`occupied`) are blocked with a light "wrong table" nudge; radiogroup semantics,
+ * keyboard focus and prefers-reduced-motion are all respected. (Adding tables is
+ * an admin/config concern — the customer picker no longer creates tables.)
  */
 
 const FONT_DISPLAY = "'DM Serif Display', Georgia, 'Times New Roman', serif"
@@ -91,12 +90,10 @@ export default function TableSelect({
   menu,
   onSelect,
   onStart,
-  onAddTable,
   onAdmin,
 }) {
   const occupiedSet = new Set(occupied)
   const [wrongTable, setWrongTable] = useState('')
-  const [addOpen, setAddOpen] = useState(false)
   const reduce = useReducedMotion()
 
   const freeCount = tables.filter((t) => !occupiedSet.has(t)).length
@@ -134,21 +131,6 @@ export default function TableSelect({
       className="relative mx-auto w-full max-w-[460px] rounded-3xl shadow-[0_0_60px_rgba(120,70,20,0.12)]"
       style={{ background: C.cream, color: C.ink, fontFamily: FONT_BODY }}
     >
-      <NewTableModal
-        open={addOpen}
-        label={label}
-        onCancel={() => setAddOpen(false)}
-        onCreate={async (tableNumber) => {
-          const result = await onAddTable?.(tableNumber)
-          if (result?.ok) {
-            setAddOpen(false)
-            setWrongTable('')
-            onSelect(result.label)
-          }
-          return result
-        }}
-      />
-
       {/* TOP BAR */}
       <div
         className="sticky top-0 z-40 flex items-center justify-between rounded-t-3xl px-5 py-3.5"
@@ -492,30 +474,6 @@ export default function TableSelect({
               </motion.button>
             )
           })}
-
-          {/* Add new table */}
-          <motion.button
-            type="button"
-            aria-label="Add new table"
-            onClick={() => setAddOpen(true)}
-            variants={{ hidden: { opacity: 0, scale: 0.92 }, show: { opacity: 1, scale: 1 } }}
-            whileTap={{ scale: 0.96 }}
-            className="flex flex-col items-center justify-center gap-1.5 rounded-[15px] px-2 py-4 transition-all duration-150 hover:opacity-90 motion-reduce:transition-none"
-            style={{ background: '#fbf7ee', border: `1.5px dashed ${C.red}`, color: C.red }}
-          >
-            <span
-              className="flex h-9 w-9 items-center justify-center rounded-full"
-              style={{ background: '#fff', border: `1px solid ${C.border2}` }}
-            >
-              <PlusIcon className="h-5 w-5" />
-            </span>
-            <span
-              className="uppercase"
-              style={{ fontSize: 9.5, fontWeight: 800, letterSpacing: '0.08em' }}
-            >
-              New
-            </span>
-          </motion.button>
         </motion.div>
       </motion.section>
 
@@ -663,166 +621,6 @@ function tableBadgeStyle(busy, selected) {
   return { ...base, fontWeight: 700, color: C.green }
 }
 
-/* --------------------------------- modal --------------------------------- */
-
-function NewTableModal({ open, label, onCancel, onCreate }) {
-  const reduceMotion = useReducedMotion()
-  const inputRef = useRef(null)
-  const [tableNumber, setTableNumber] = useState('')
-  const [error, setError] = useState('')
-  const [busy, setBusy] = useState(false)
-
-  useEffect(() => {
-    if (!open) {
-      setTableNumber('')
-      setError('')
-      setBusy(false)
-      return
-    }
-
-    const onKey = (e) => {
-      if (e.key === 'Escape' && !busy) onCancel()
-    }
-    document.addEventListener('keydown', onKey)
-    document.body.style.overflow = 'hidden'
-    inputRef.current?.focus()
-
-    return () => {
-      document.removeEventListener('keydown', onKey)
-      document.body.style.overflow = ''
-    }
-  }, [open, busy, onCancel])
-
-  async function handleSubmit(e) {
-    e.preventDefault()
-    const num = tableNumber.trim()
-    if (!num || !/^\d+$/.test(num) || Number(num) < 1) {
-      setError('Enter a valid table number (1 or greater).')
-      return
-    }
-
-    setBusy(true)
-    setError('')
-    const result = await onCreate(num)
-    setBusy(false)
-
-    if (!result?.ok) {
-      setError(result?.message || 'Could not create the table.')
-    }
-  }
-
-  const spring = reduceMotion
-    ? { duration: 0 }
-    : { type: 'spring', stiffness: 420, damping: 32 }
-
-  return (
-    <AnimatePresence>
-      {open && (
-        <motion.div
-          className="fixed inset-0 z-50 flex items-end justify-center p-4 sm:items-center"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          transition={{ duration: reduceMotion ? 0 : 0.2 }}
-        >
-          <motion.button
-            type="button"
-            aria-label="Close dialog"
-            className="absolute inset-0 backdrop-blur-sm"
-            style={{ background: 'rgba(35,22,16,0.4)' }}
-            onClick={busy ? undefined : onCancel}
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-          />
-
-          <motion.div
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="new-table-title"
-            className="relative z-10 w-full max-w-sm overflow-hidden rounded-xl shadow-2xl"
-            style={{ background: C.cream, color: C.ink, border: `1px solid ${C.border}` }}
-            initial={reduceMotion ? false : { opacity: 0, y: 24, scale: 0.97 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={reduceMotion ? { opacity: 0 } : { opacity: 0, y: 16, scale: 0.98 }}
-            transition={spring}
-          >
-            <div
-              className="px-6 pb-5 pt-6"
-              style={{ borderBottom: `1px solid ${C.border}`, background: '#fff' }}
-            >
-              <div
-                className="mb-3 flex h-11 w-11 items-center justify-center rounded-full"
-                style={{ background: C.goldBg, color: C.gold }}
-              >
-                <PlusIcon className="h-5 w-5" />
-              </div>
-              <h2
-                id="new-table-title"
-                style={{ fontFamily: FONT_DISPLAY, fontSize: 22, fontWeight: 400 }}
-              >
-                Add a table
-              </h2>
-              <p className="mt-1.5" style={{ fontSize: 14, color: C.brown }}>
-                Enter the table number shown on the floor. It will appear as{' '}
-                <span className="font-semibold" style={{ color: C.ink }}>
-                  {label} #
-                </span>
-                .
-              </p>
-            </div>
-
-            <form onSubmit={handleSubmit} className="space-y-4 px-6 py-5">
-              <div>
-                <Label htmlFor="new-table-number" required>
-                  Table number
-                </Label>
-                <div className="mt-2 flex items-center gap-2">
-                  <span
-                    className="shrink-0 rounded-md px-3 py-2.5 text-sm font-medium"
-                    style={{ background: C.goldBg, color: C.gold }}
-                  >
-                    {label}
-                  </span>
-                  <Input
-                    ref={inputRef}
-                    id="new-table-number"
-                    type="text"
-                    inputMode="numeric"
-                    pattern="[0-9]*"
-                    placeholder="e.g. 13"
-                    value={tableNumber}
-                    invalid={!!error}
-                    aria-describedby={error ? 'new-table-error' : undefined}
-                    onChange={(e) => {
-                      setTableNumber(e.target.value.replace(/\D/g, ''))
-                      setError('')
-                    }}
-                    className="text-lg font-bold tabular-nums"
-                  />
-                </div>
-                <FieldError id="new-table-error">{error}</FieldError>
-              </div>
-
-              <div
-                className="flex flex-col-reverse gap-2 pt-4 sm:flex-row sm:justify-end"
-                style={{ borderTop: `1px solid ${C.border}` }}
-              >
-                <Button type="button" variant="outline" onClick={onCancel} disabled={busy}>
-                  Cancel
-                </Button>
-                <Button type="submit" disabled={busy || !tableNumber.trim()}>
-                  {busy ? 'Adding…' : 'Add table'}
-                </Button>
-              </div>
-            </form>
-          </motion.div>
-        </motion.div>
-      )}
-    </AnimatePresence>
-  )
-}
-
 /* --------------------------------- Icons -------------------------------- */
 
 function WrongTableIcon({ className }) {
@@ -838,14 +636,6 @@ function DotIcon({ className }) {
   return (
     <svg viewBox="0 0 8 8" className={className} aria-hidden="true">
       <circle cx="4" cy="4" r="4" fill="currentColor" />
-    </svg>
-  )
-}
-
-function PlusIcon({ className }) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" className={className} aria-hidden="true">
-      <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
     </svg>
   )
 }

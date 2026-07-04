@@ -6,6 +6,7 @@ import { getAllOrders, completeOrder, cancelOrder } from '@/lib/orderStore'
 import { formatCurrency } from '@/lib/billing'
 import { signIn, signOut, isSupabaseConfigured } from '@/lib/auth'
 import { C, FONT_DISPLAY, FONT_MONO } from '@/components/order/theme'
+import PizzaLoader from '@/components/order/PizzaLoader'
 
 const FILTERS = [
   { key: 'all', label: 'All' },
@@ -308,8 +309,8 @@ function Sidebar({ section, setSection, activeCount, todaySales, todayOrders, to
 /** Brief placeholder while the persisted Supabase session is being restored. */
 function AuthChecking() {
   return (
-    <div className="flex flex-1 items-center justify-center p-6">
-      <p style={{ fontSize: 14, color: C.brown2, fontWeight: 600 }}>Checking session…</p>
+    <div className="flex flex-1 items-center justify-center">
+      <PizzaLoader variant="inline" />
     </div>
   )
 }
@@ -529,9 +530,7 @@ function OrdersPanel({
             </div>
 
             {loading && orders.length === 0 ? (
-              <p className="py-10 text-center" style={{ fontSize: 14, color: C.brown2 }}>
-                Loading orders…
-              </p>
+              <PizzaLoader variant="inline" />
             ) : orders.length === 0 ? (
               <p className="py-10 text-center" style={{ fontSize: 14, color: C.brown2 }}>
                 {totalCount === 0 ? 'No orders yet. Place one from the Order tab.' : 'No orders match this filter.'}
