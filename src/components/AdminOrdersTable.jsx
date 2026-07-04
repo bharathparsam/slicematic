@@ -1,17 +1,23 @@
 import { useEffect, useRef, useState } from 'react'
 import { motion, AnimatePresence, useReducedMotion } from 'framer-motion'
-import { Card, CardHeader, CardTitle, CardDescription, CardContent, Table, THead, TH, TR, TD, Button } from '@/components/ui/primitives'
 import AdminAnalytics from '@/components/AdminAnalytics'
 import { getAllOrders, completeOrder, cancelOrder } from '@/lib/orderStore'
 import { formatCurrency } from '@/lib/billing'
+import { C, FONT_DISPLAY, FONT_MONO } from '@/components/order/theme'
 
 const PLACEHOLDER_PASSWORD = 'slice123'
-const SECTIONS = [
-  { id: 'orders', label: 'Orders', icon: OrdersIcon },
-  { id: 'analytics', label: 'Analytics', icon: AnalyticsIcon },
+
+const FILTERS = [
+  { key: 'all', label: 'All' },
+  { key: 'active', label: 'Active' },
+  { key: 'completed', label: 'Completed' },
+  { key: 'cancelled', label: 'Cancelled' },
 ]
 
-export default function AdminOrdersTable({ onModify, unlocked, onUnlock }) {
+// Orders table column template (kept in sync between the header + body rows).
+const GRID = '96px 100px 72px 1.3fr 1.8fr 48px 108px 66px 168px'
+
+export default function AdminOrdersTable({ onModify, onExit, unlocked, onUnlock }) {
   const [pw, setPw] = useState('')
   const [pwError, setPwError] = useState('')
   const [orders, setOrders] = useState([])
@@ -22,6 +28,7 @@ export default function AdminOrdersTable({ onModify, unlocked, onUnlock }) {
   const [cancellingId, setCancellingId] = useState('')
   const [cancelTarget, setCancelTarget] = useState(null)
   const [section, setSection] = useState('orders')
+  const [filter, setFilter] = useState('all')
 
   // Unlock state is owned by App so it survives the Modify round-trip (this
   // component unmounts while the order is edited in the Order view).
@@ -56,20 +63,16 @@ export default function AdminOrdersTable({ onModify, unlocked, onUnlock }) {
     setLoadError('')
     setConfirmOrder(o)
   }
-
   function closeCompleteDialog() {
     if (completingId) return
     setConfirmOrder(null)
   }
-
   async function confirmComplete() {
     if (!confirmOrder) return
-
     setCompletingId(confirmOrder.id)
     setLoadError('')
     const result = await completeOrder(confirmOrder.id)
     setCompletingId('')
-
     if (result.ok) {
       setConfirmOrder(null)
       await refresh()
@@ -82,20 +85,16 @@ export default function AdminOrdersTable({ onModify, unlocked, onUnlock }) {
     setLoadError('')
     setCancelTarget(o)
   }
-
   function closeCancelDialog() {
     if (cancellingId) return
     setCancelTarget(null)
   }
-
   async function confirmCancel() {
     if (!cancelTarget) return
-
     setCancellingId(cancelTarget.id)
     setLoadError('')
     const result = await cancelOrder(cancelTarget.id)
     setCancellingId('')
-
     if (result.ok) {
       setCancelTarget(null)
       await refresh()
@@ -104,119 +103,252 @@ export default function AdminOrdersTable({ onModify, unlocked, onUnlock }) {
     }
   }
 
-  if (!unlocked) {
-    return (
-      <Card className="mx-auto max-w-sm">
-        <CardHeader>
-          <CardTitle>Admin access</CardTitle>
-          <CardDescription>
-            Placeholder gate — real auth comes with Supabase (Stage 3). Password:{' '}
-            <code className="rounded bg-muted px-1">slice123</code>
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <form onSubmit={tryUnlock} className="space-y-3">
-            <label htmlFor="admin-pw" className="block text-sm font-medium">
-              Password
-            </label>
-            <input
-              id="admin-pw"
-              type="password"
-              value={pw}
-              onChange={(e) => setPw(e.target.value)}
-              aria-invalid={!!pwError}
-              aria-describedby={pwError ? 'admin-pw-error' : undefined}
-              className="h-11 w-full rounded-md border border-input bg-background px-3"
-            />
-            {pwError && (
-              <p id="admin-pw-error" role="alert" className="text-sm text-destructive">
-                {pwError}
-              </p>
-            )}
-            <Button type="submit" className="w-full">
-              Unlock
-            </Button>
-          </form>
-        </CardContent>
-      </Card>
-    )
-  }
+  const activeCount = orders.filter((o) => normStatus(o.status) === 'active').length
+  const filtered = filter === 'all' ? orders : orders.filter((o) => normStatus(o.status) === filter)
 
-  const activeCount = orders.filter((o) => o.status !== 'completed' && o.status !== 'cancelled').length
+  // "Today so far" — non-cancelled orders placed today (client-derived, no new API).
+  const todays = orders.filter((o) => normStatus(o.status) !== 'cancelled' && isToday(o.timestamp))
+  const todaySalesN = todays.reduce((s, o) => s + Number(o.total || 0), 0)
+  const todayAvgN = todays.length ? todaySalesN / todays.length : 0
 
   return (
-    <>
-      <CompleteOrderDialog
-        order={confirmOrder}
-        busy={!!completingId}
-        onCancel={closeCompleteDialog}
-        onConfirm={confirmComplete}
-      />
+    <div className="min-h-screen w-full" style={{ background: '#efe4d0' }}>
+      <div
+        className="mx-auto flex min-h-screen w-full max-w-[1280px] flex-col"
+        style={{ background: '#faf3e6', color: C.ink, boxShadow: '0 0 80px rgba(120,70,20,0.1)' }}
+      >
+        <AdminConfirmModal
+          order={confirmOrder}
+          tone="complete"
+          busy={!!completingId}
+          onCancel={closeCompleteDialog}
+          onConfirm={confirmComplete}
+        />
+        <AdminConfirmModal
+          order={cancelTarget}
+          tone="cancel"
+          busy={!!cancellingId}
+          onCancel={closeCancelDialog}
+          onConfirm={confirmCancel}
+        />
 
-      <CancelOrderDialog
-        order={cancelTarget}
-        busy={!!cancellingId}
-        onCancel={closeCancelDialog}
-        onConfirm={confirmCancel}
-      />
+        <TopBar onExit={onExit} />
 
-      <div className="flex min-h-[70vh] w-full flex-col gap-4 sm:flex-row sm:items-start">
-        <aside className="w-full shrink-0 sm:w-48">
-          <nav
-            aria-label="Admin sections"
-            className="flex flex-row gap-1 rounded-lg border border-border bg-background p-1 sm:flex-col"
-          >
-            {SECTIONS.map(({ id, label, icon: Icon }) => {
-              const active = section === id
-              return (
-                <button
-                  key={id}
-                  type="button"
-                  onClick={() => setSection(id)}
-                  aria-current={active ? 'page' : undefined}
-                  className={
-                    'flex flex-1 items-center gap-2 rounded-md px-3 py-2.5 text-left text-sm font-semibold transition-colors sm:flex-none ' +
-                    (active
-                      ? 'bg-brand text-brand-foreground shadow-sm'
-                      : 'text-muted-foreground hover:bg-muted hover:text-foreground')
-                  }
-                >
-                  <Icon className="h-4 w-4 shrink-0" />
-                  {label}
-                </button>
-              )
-            })}
-          </nav>
-        </aside>
-
-        <div className="min-w-0 flex-1">
-          {section === 'analytics' ? (
-            <AdminAnalytics />
-          ) : (
-            <OrdersPanel
-              orders={orders}
-              loading={loading}
-              loadError={loadError}
+        {!unlocked ? (
+          <GateCard pw={pw} setPw={setPw} pwError={pwError} onSubmit={tryUnlock} />
+        ) : (
+          <div className="flex min-h-0 flex-1 flex-col md:flex-row">
+            <Sidebar
+              section={section}
+              setSection={setSection}
               activeCount={activeCount}
-              completingId={completingId}
-              cancellingId={cancellingId}
-              onRefresh={refresh}
-              onComplete={openCompleteDialog}
-              onModify={onModify}
-              onCancel={openCancelDialog}
+              todaySales={formatCurrency(todaySalesN)}
+              todayOrders={todays.length}
+              todayAvg={formatCurrency(todayAvgN)}
             />
-          )}
-        </div>
+
+            {section === 'analytics' ? (
+              <AdminAnalytics />
+            ) : (
+              <OrdersPanel
+                orders={filtered}
+                totalCount={orders.length}
+                loading={loading}
+                loadError={loadError}
+                activeCount={activeCount}
+                filter={filter}
+                setFilter={setFilter}
+                completingId={completingId}
+                cancellingId={cancellingId}
+                onRefresh={refresh}
+                onComplete={openCompleteDialog}
+                onModify={onModify}
+                onCancel={openCancelDialog}
+              />
+            )}
+          </div>
+        )}
       </div>
-    </>
+    </div>
   )
 }
 
+/* -------------------------------- shell --------------------------------- */
+
+function TopBar({ onExit }) {
+  return (
+    <header
+      className="sticky top-0 z-30 flex items-center justify-between px-6 py-4 sm:px-8"
+      style={{ background: C.ink, color: C.cream }}
+    >
+      <div className="flex items-center gap-3">
+        <div
+          className="flex h-[42px] w-[42px] items-center justify-center rounded-xl"
+          style={{ background: C.red, boxShadow: '0 6px 16px rgba(197,52,28,0.4)' }}
+        >
+          <span style={{ fontFamily: FONT_DISPLAY, color: C.cream, fontSize: 23, lineHeight: 1 }}>S</span>
+        </div>
+        <div style={{ lineHeight: 1.15 }}>
+          <div style={{ fontFamily: FONT_DISPLAY, fontSize: 21 }}>SliceMatic</div>
+          <div className="uppercase" style={{ fontSize: 10.5, letterSpacing: '0.16em', color: '#c8a883', fontWeight: 600 }}>
+            Order Desk · Admin
+          </div>
+        </div>
+      </div>
+      <div className="flex items-center gap-4">
+        <div className="hidden items-center gap-2 sm:flex" style={{ fontSize: 13, color: '#d9c6a6', fontWeight: 600 }}>
+          <span
+            className="h-2 w-2 rounded-full"
+            style={{ background: '#5ec26b', boxShadow: '0 0 0 4px rgba(94,194,107,0.2)' }}
+          />
+          Live · Asia/Kolkata
+        </div>
+        <div className="flex rounded-full p-1" style={{ background: '#3a2418' }}>
+          <button
+            type="button"
+            onClick={onExit}
+            className="rounded-full px-4 py-2 font-semibold"
+            style={{ fontSize: 13.5, color: '#c8a883' }}
+          >
+            Order
+          </button>
+          <span
+            className="rounded-full px-4 py-2 font-bold"
+            style={{ fontSize: 13.5, background: C.cream, color: C.ink }}
+          >
+            Admin
+          </span>
+        </div>
+      </div>
+    </header>
+  )
+}
+
+function Sidebar({ section, setSection, activeCount, todaySales, todayOrders, todayAvg }) {
+  const items = [
+    { key: 'orders', icon: '📋', label: 'Orders', badge: activeCount || '' },
+    { key: 'analytics', icon: '📊', label: 'Analytics', badge: '' },
+  ]
+  return (
+    <aside
+      className="flex flex-none flex-col gap-2 p-5 md:w-[236px]"
+      style={{ borderRight: `1px solid #eaddc5` }}
+    >
+      <div
+        className="px-3 pb-2 uppercase"
+        style={{ fontSize: 11, letterSpacing: '0.18em', color: '#b0987a', fontWeight: 700 }}
+      >
+        Manage
+      </div>
+      {items.map((n) => {
+        const sel = section === n.key
+        return (
+          <button
+            key={n.key}
+            type="button"
+            onClick={() => setSection(n.key)}
+            aria-current={sel ? 'page' : undefined}
+            className="flex items-center justify-between rounded-[13px] px-4 py-3 font-bold transition-colors"
+            style={
+              sel
+                ? { background: C.red, color: C.cream, boxShadow: '0 8px 20px rgba(197,52,28,0.28)', fontSize: 15 }
+                : { background: 'transparent', color: C.brown, fontSize: 15 }
+            }
+          >
+            <span className="flex items-center gap-3">
+              <span style={{ fontSize: 17 }}>{n.icon}</span>
+              {n.label}
+            </span>
+            {n.badge ? (
+              <span
+                className="flex h-[22px] min-w-[22px] items-center justify-center rounded-full px-[7px]"
+                style={
+                  sel
+                    ? { background: 'rgba(255,255,255,0.28)', color: '#fff', fontSize: 12, fontWeight: 800 }
+                    : { background: C.red, color: '#fff', fontSize: 12, fontWeight: 800 }
+                }
+              >
+                {n.badge}
+              </span>
+            ) : null}
+          </button>
+        )
+      })}
+
+      <div
+        className="mt-auto rounded-2xl p-4"
+        style={{ background: C.goldBg, border: `1px solid ${C.goldBorder}` }}
+      >
+        <div style={{ fontFamily: FONT_DISPLAY, fontSize: 15, color: '#8a5a2a' }}>Today so far</div>
+        <div className="mt-1" style={{ fontFamily: FONT_DISPLAY, fontSize: 28, color: C.red }}>
+          {todaySales}
+        </div>
+        <div className="mt-0.5" style={{ fontSize: 12, color: C.gold, fontWeight: 600 }}>
+          {todayOrders} {todayOrders === 1 ? 'order' : 'orders'} · avg {todayAvg}
+        </div>
+      </div>
+    </aside>
+  )
+}
+
+function GateCard({ pw, setPw, pwError, onSubmit }) {
+  return (
+    <div className="flex flex-1 items-center justify-center p-6">
+      <div
+        className="w-full max-w-sm rounded-[20px] p-7"
+        style={{ background: '#fff', border: `1px solid ${C.border}`, boxShadow: `0 4px 0 ${C.border}` }}
+      >
+        <h2 style={{ fontFamily: FONT_DISPLAY, fontWeight: 400, fontSize: 24, margin: 0, color: C.ink }}>
+          Admin access
+        </h2>
+        <p className="mt-1.5" style={{ fontSize: 13.5, color: C.brown2 }}>
+          Placeholder gate — real auth comes with Supabase (Stage 3). Password:{' '}
+          <code className="rounded px-1" style={{ background: C.goldBg, color: C.gold }}>
+            slice123
+          </code>
+        </p>
+        <form onSubmit={onSubmit} className="mt-4 space-y-3">
+          <label htmlFor="admin-pw" className="block" style={{ fontSize: 13, fontWeight: 700, color: C.gold }}>
+            Password
+          </label>
+          <input
+            id="admin-pw"
+            type="password"
+            value={pw}
+            onChange={(e) => setPw(e.target.value)}
+            aria-invalid={!!pwError}
+            aria-describedby={pwError ? 'admin-pw-error' : undefined}
+            className="w-full rounded-xl px-3 py-3"
+            style={{ border: `1.5px solid ${pwError ? C.red : C.border2}`, background: '#fff', fontSize: 15, color: C.ink }}
+          />
+          {pwError && (
+            <p id="admin-pw-error" role="alert" style={{ fontSize: 13, color: C.red, fontWeight: 600 }}>
+              {pwError}
+            </p>
+          )}
+          <button
+            type="submit"
+            className="w-full rounded-xl py-3 font-bold"
+            style={{ background: C.red, color: C.cream, fontSize: 15, boxShadow: '0 10px 22px rgba(197,52,28,0.3)' }}
+          >
+            Unlock
+          </button>
+        </form>
+      </div>
+    </div>
+  )
+}
+
+/* ------------------------------ orders view ----------------------------- */
+
 function OrdersPanel({
   orders,
+  totalCount,
   loading,
   loadError,
   activeCount,
+  filter,
+  setFilter,
   completingId,
   cancellingId,
   onRefresh,
@@ -225,447 +357,366 @@ function OrdersPanel({
   onCancel,
 }) {
   return (
-      <Card className="w-full min-w-0 flex-1">
-      <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+    <main className="min-w-0 flex-1 px-6 py-7 sm:px-8" style={{ animation: 'floatUp .35s ease both' }}>
+      <div className="mb-5 flex flex-wrap items-end justify-between gap-4">
         <div>
-          <CardTitle>All orders ({orders.length})</CardTitle>
-          <CardDescription>
-            Loaded from the API · most recent first
-            {activeCount > 0 && ` · ${activeCount} active`}
-          </CardDescription>
+          <h1 style={{ fontFamily: FONT_DISPLAY, fontWeight: 400, fontSize: 34, margin: 0, color: C.ink }}>
+            All orders
+          </h1>
+          <div className="mt-1.5" style={{ fontSize: 13.5, color: C.brown2, fontWeight: 600 }}>
+            {orders.length} {orders.length === 1 ? 'order' : 'orders'} · most recent first ·{' '}
+            <span style={{ color: C.red }}>{activeCount} active</span>
+          </div>
         </div>
-        <Button variant="outline" onClick={onRefresh} disabled={loading}>
-          {loading ? 'Loading…' : 'Refresh'}
-        </Button>
-      </CardHeader>
-      <CardContent>
-        {loadError && (
-          <p role="alert" className="mb-4 text-sm text-destructive">
-            {loadError}
-          </p>
-        )}
-        {loading && orders.length === 0 ? (
-          <p className="py-8 text-center text-sm text-muted-foreground">Loading orders…</p>
-        ) : orders.length === 0 ? (
-          <p className="py-8 text-center text-sm text-muted-foreground">
-            No orders yet. Place one from the Order tab.
-          </p>
-        ) : (
-          <Table className="table-fixed">
-            <colgroup>
-              <col className="w-[7rem]" />
-              <col className="w-[5.5rem]" />
-              <col className="w-[5rem]" />
-              <col className="w-[10rem]" />
-              <col />
-              <col className="w-[3rem]" />
-              <col className="w-[6rem]" />
-              <col className="w-[5rem]" />
-              <col className="w-[9rem]" />
-              <col className="w-[9.5rem]" />
-            </colgroup>
-            <THead>
-              <TR>
-                <TH>Order ID</TH>
-                <TH>Status</TH>
-                <TH>Table</TH>
-                <TH>Customer</TH>
-                <TH>Items</TH>
-                <TH className="text-right">Qty</TH>
-                <TH className="text-right">Total</TH>
-                <TH>Payment</TH>
-                <TH>Time</TH>
-                <TH className="text-right">Actions</TH>
-              </TR>
-            </THead>
-            <tbody>
-              {orders.map((o) => {
-                const cancelled = o.status === 'cancelled'
-                const completed = o.status === 'completed'
-                const active = !cancelled && !completed
+        <div className="flex items-center gap-2.5">
+          <div className="flex gap-0.5 rounded-xl p-1" style={{ background: '#f0e5d2' }}>
+            {FILTERS.map((f) => {
+              const sel = filter === f.key
+              return (
+                <button
+                  key={f.key}
+                  type="button"
+                  onClick={() => setFilter(f.key)}
+                  className="rounded-[9px] px-3.5 py-2 font-bold transition-colors"
+                  style={
+                    sel
+                      ? { background: '#fff', color: C.ink, boxShadow: '0 1px 3px rgba(0,0,0,0.1)', fontSize: 13 }
+                      : { background: 'transparent', color: C.brown2, fontSize: 13 }
+                  }
+                >
+                  {f.label}
+                </button>
+              )
+            })}
+          </div>
+          <button
+            type="button"
+            onClick={onRefresh}
+            disabled={loading}
+            className="rounded-xl px-5 py-2.5 font-bold disabled:opacity-60"
+            style={{ border: `1.5px solid ${C.border2}`, background: '#fff', color: C.ink, fontSize: 14 }}
+          >
+            {loading ? 'Loading…' : '↻ Refresh'}
+          </button>
+        </div>
+      </div>
+
+      {loadError && (
+        <p role="alert" className="mb-4" style={{ fontSize: 14, color: C.red, fontWeight: 600 }}>
+          {loadError}
+        </p>
+      )}
+
+      <div
+        className="overflow-hidden rounded-[20px]"
+        style={{ background: '#fff', border: `1px solid ${C.border}`, boxShadow: `0 4px 0 ${C.border}` }}
+      >
+        <div className="overflow-x-auto">
+          <div style={{ minWidth: 980 }}>
+            {/* header */}
+            <div
+              className="grid items-center gap-3.5 px-6 py-4 uppercase"
+              style={{
+                gridTemplateColumns: GRID,
+                background: C.cream,
+                borderBottom: `1px solid ${C.border}`,
+                fontSize: 11.5,
+                letterSpacing: '0.08em',
+                color: '#a0876a',
+                fontWeight: 700,
+              }}
+            >
+              <div>Order</div>
+              <div>Status</div>
+              <div>Table</div>
+              <div>Customer</div>
+              <div>Items</div>
+              <div className="text-right">Qty</div>
+              <div className="text-right">Total</div>
+              <div>Pay</div>
+              <div className="text-right">Actions</div>
+            </div>
+
+            {loading && orders.length === 0 ? (
+              <p className="py-10 text-center" style={{ fontSize: 14, color: C.brown2 }}>
+                Loading orders…
+              </p>
+            ) : orders.length === 0 ? (
+              <p className="py-10 text-center" style={{ fontSize: 14, color: C.brown2 }}>
+                {totalCount === 0 ? 'No orders yet. Place one from the Order tab.' : 'No orders match this filter.'}
+              </p>
+            ) : (
+              orders.map((o) => {
+                const status = normStatus(o.status)
+                const cancelled = status === 'cancelled'
+                const active = status === 'active'
                 return (
-                  <TR key={o.id} className={active ? '' : 'opacity-60'}>
-                    <TD className="align-middle whitespace-nowrap font-mono text-xs font-semibold text-brand-dark">
+                  <div
+                    key={o.id}
+                    className="admin-row grid items-center gap-3.5 px-6 py-4 transition-colors"
+                    style={{ gridTemplateColumns: GRID, borderBottom: '1px solid #f6ecda' }}
+                  >
+                    <div style={{ fontFamily: FONT_MONO, fontWeight: 700, fontSize: 13, color: C.red }}>
                       {o.orderCode || '—'}
-                    </TD>
-                    <TD className="align-middle">
-                      <StatusBadge status={o.status} />
-                    </TD>
-                    <TD className="align-middle whitespace-nowrap font-medium">
+                    </div>
+                    <div>
+                      <StatusBadge status={status} />
+                    </div>
+                    <div style={{ fontWeight: 700, fontSize: 14, color: o.table ? C.ink : '#c0ab8c' }}>
                       {o.table || '—'}
-                    </TD>
-                    <TD className="align-middle">
-                      <div className="font-medium">{o.customerName}</div>
-                      <div className="text-xs text-muted-foreground">{o.phone}</div>
-                    </TD>
-                    <TD className="align-middle text-muted-foreground">
-                      {summariseItems(o)}
-                    </TD>
-                    <TD className="align-middle text-right tabular-nums">{o.quantity}</TD>
-                    <TD
-                      className={
-                        'align-middle text-right font-semibold tabular-nums ' +
-                        (cancelled ? 'line-through' : '')
-                      }
+                    </div>
+                    <div className="min-w-0">
+                      <div className="truncate" style={{ fontWeight: 700, fontSize: 14, color: C.ink }}>
+                        {o.customerName}
+                      </div>
+                      <div style={{ fontFamily: FONT_MONO, fontSize: 11.5, color: '#a0876a' }}>{o.phone}</div>
+                    </div>
+                    <div style={{ fontSize: 13, color: C.brown, lineHeight: 1.4 }}>{summariseItems(o)}</div>
+                    <div className="text-right tabular-nums" style={{ fontWeight: 700, fontSize: 14, color: C.ink }}>
+                      {o.quantity}
+                    </div>
+                    <div
+                      className="text-right tabular-nums"
+                      style={{
+                        fontFamily: FONT_DISPLAY,
+                        fontSize: 16,
+                        color: cancelled ? '#c0ab8c' : C.ink,
+                        textDecoration: cancelled ? 'line-through' : 'none',
+                      }}
                     >
                       {formatCurrency(o.total)}
-                    </TD>
-                    <TD className="align-middle whitespace-nowrap">{o.paymentMode}</TD>
-                    <TD className="align-middle whitespace-nowrap text-xs text-muted-foreground">
-                      {formatTime(o.timestamp)}
-                    </TD>
-                    <TD className="align-middle">
+                    </div>
+                    <div style={{ fontSize: 13, color: C.brown, fontWeight: 600 }}>{o.paymentMode}</div>
+                    <div className="flex justify-end gap-1.5">
                       {active ? (
-                        <div className="flex flex-col gap-1.5">
-                          <button
-                            type="button"
-                            onClick={() => onComplete(o)}
-                            disabled={completingId === o.id}
-                            className="whitespace-nowrap rounded-md border border-green-200 bg-background px-2 py-1.5 text-xs font-semibold text-green-700 transition-colors hover:bg-green-50 disabled:opacity-50"
-                          >
-                            {completingId === o.id ? 'Completing…' : 'Complete'}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => onModify?.(o)}
-                            className="whitespace-nowrap rounded-md border border-input bg-background px-2 py-1.5 text-xs font-semibold text-brand-dark transition-colors hover:bg-brand/10"
-                          >
+                        <>
+                          <RowAction tone="green" onClick={() => onComplete(o)} disabled={completingId === o.id}>
+                            {completingId === o.id ? '…' : 'Complete'}
+                          </RowAction>
+                          <RowAction tone="neutral" onClick={() => onModify?.(o)}>
                             Modify
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => onCancel(o)}
-                            disabled={cancellingId === o.id}
-                            className="whitespace-nowrap rounded-md border border-destructive/30 bg-background px-2 py-1.5 text-xs font-semibold text-destructive transition-colors hover:bg-destructive/10 disabled:opacity-50"
-                          >
-                            {cancellingId === o.id ? 'Cancelling…' : 'Cancel'}
-                          </button>
-                        </div>
+                          </RowAction>
+                          <RowAction tone="red" onClick={() => onCancel(o)} disabled={cancellingId === o.id}>
+                            {cancellingId === o.id ? '…' : 'Cancel'}
+                          </RowAction>
+                        </>
                       ) : (
-                        <span className="text-xs text-muted-foreground">—</span>
+                        <span style={{ fontSize: 12, color: '#c0ab8c' }}>—</span>
                       )}
-                    </TD>
-                  </TR>
+                    </div>
+                  </div>
                 )
-              })}
-            </tbody>
-          </Table>
-        )}
-      </CardContent>
-    </Card>
+              })
+            )}
+          </div>
+        </div>
+      </div>
+    </main>
   )
 }
 
-function OrdersIcon({ className }) {
+function RowAction({ tone, onClick, disabled, children }) {
+  const tones = {
+    green: { color: C.green, border: '#bfe0bf' },
+    red: { color: C.red, border: '#e9c3ba' },
+    neutral: { color: C.ink, border: C.border2 },
+  }
+  const t = tones[tone] ?? tones.neutral
   return (
-    <svg viewBox="0 0 24 24" fill="none" className={className} aria-hidden="true">
-      <path
-        d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-      />
-    </svg>
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className="whitespace-nowrap rounded-lg px-2.5 py-1.5 font-bold transition-colors disabled:opacity-50"
+      style={{ border: `1.5px solid ${t.border}`, background: '#fff', color: t.color, fontSize: 12 }}
+    >
+      {children}
+    </button>
   )
 }
 
-function AnalyticsIcon({ className }) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" className={className} aria-hidden="true">
-      <path
-        d="M4 19V5M9 19V9M14 19v-6M19 19V3"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-      />
-    </svg>
-  )
-}
-
-/** Styled confirmation dialog — replaces the browser confirm for completing orders. */
-function CompleteOrderDialog({ order, busy, onCancel, onConfirm }) {
-  const reduceMotion = useReducedMotion()
-  const confirmRef = useRef(null)
-
-  useEffect(() => {
-    if (!order) return
-
-    const onKey = (e) => {
-      if (e.key === 'Escape' && !busy) onCancel()
-    }
-    document.addEventListener('keydown', onKey)
-    document.body.style.overflow = 'hidden'
-    confirmRef.current?.focus()
-
-    return () => {
-      document.removeEventListener('keydown', onKey)
-      document.body.style.overflow = ''
-    }
-  }, [order, busy, onCancel])
-
-  const spring = reduceMotion
-    ? { duration: 0 }
-    : { type: 'spring', stiffness: 420, damping: 32 }
-
-  return (
-    <AnimatePresence>
-      {order && (
-        <motion.div
-          className="fixed inset-0 z-50 flex items-end justify-center p-4 sm:items-center"
-          role="presentation"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          transition={{ duration: reduceMotion ? 0 : 0.2 }}
-        >
-          <motion.button
-            type="button"
-            aria-label="Close dialog"
-            className="absolute inset-0 bg-foreground/40 backdrop-blur-sm"
-            onClick={busy ? undefined : onCancel}
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-          />
-
-          <motion.div
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="complete-order-title"
-            aria-describedby="complete-order-desc"
-            className="relative z-10 w-full max-w-md overflow-hidden rounded-xl border border-border bg-background shadow-2xl"
-            initial={reduceMotion ? false : { opacity: 0, y: 24, scale: 0.97 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={reduceMotion ? { opacity: 0 } : { opacity: 0, y: 16, scale: 0.98 }}
-            transition={spring}
-          >
-            <div className="border-b border-border bg-gradient-to-br from-green-50 to-background px-6 pb-5 pt-6">
-              <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-green-100 text-2xl shadow-inner">
-                ✓
-              </div>
-              <h2 id="complete-order-title" className="text-xl font-bold tracking-tight">
-                Complete this order?
-              </h2>
-              <p id="complete-order-desc" className="mt-1.5 text-sm text-muted-foreground">
-                Mark{' '}
-                <span className="font-mono font-semibold text-brand-dark">
-                  {order.orderCode || 'this order'}
-                </span>{' '}
-                as done. This action cannot be undone from admin.
-              </p>
-            </div>
-
-            <div className="space-y-4 px-6 py-5">
-              <dl className="grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
-                <div>
-                  <dt className="text-muted-foreground">Customer</dt>
-                  <dd className="font-medium">{order.customerName}</dd>
-                </div>
-                <div>
-                  <dt className="text-muted-foreground">Phone</dt>
-                  <dd className="font-medium tabular-nums">{order.phone}</dd>
-                </div>
-                {order.table && (
-                  <div>
-                    <dt className="text-muted-foreground">Table</dt>
-                    <dd className="font-medium">{order.table}</dd>
-                  </div>
-                )}
-                <div>
-                  <dt className="text-muted-foreground">Payment</dt>
-                  <dd className="font-medium">{order.paymentMode || '—'}</dd>
-                </div>
-                <div className="col-span-2">
-                  <dt className="text-muted-foreground">Items</dt>
-                  <dd className="font-medium">{summariseItems(order)}</dd>
-                </div>
-              </dl>
-
-              <div className="flex items-center justify-between rounded-lg border border-brand/20 bg-brand/5 px-4 py-3">
-                <span className="text-sm text-muted-foreground">Amount collected</span>
-                <span className="text-lg font-extrabold text-brand-dark">
-                  {formatCurrency(order.total)}
-                </span>
-              </div>
-
-              {order.table && (
-                <div className="flex gap-3 rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-800">
-                  <span aria-hidden="true">🪑</span>
-                  <p>
-                    <span className="font-semibold">{order.table}</span> will be freed and available
-                    for the next guest.
-                  </p>
-                </div>
-              )}
-            </div>
-
-            <div className="flex flex-col-reverse gap-2 border-t border-border bg-muted/40 px-6 py-4 sm:flex-row sm:justify-end">
-              <Button
-                variant="outline"
-                className="sm:min-w-[7rem]"
-                onClick={onCancel}
-                disabled={busy}
-              >
-                Cancel
-              </Button>
-              <button
-                ref={confirmRef}
-                type="button"
-                onClick={onConfirm}
-                disabled={busy}
-                className="inline-flex items-center justify-center rounded-md border border-green-300 bg-green-600 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-green-700 disabled:opacity-50 sm:min-w-[9rem]"
-              >
-                {busy ? 'Completing…' : 'Complete Order'}
-              </button>
-            </div>
-          </motion.div>
-        </motion.div>
-      )}
-    </AnimatePresence>
-  )
-}
-
-/** Confirmation dialog for cancelling (voiding) an order. */
-function CancelOrderDialog({ order, busy, onCancel, onConfirm }) {
-  const reduceMotion = useReducedMotion()
-  const confirmRef = useRef(null)
-
-  useEffect(() => {
-    if (!order) return
-    const onKey = (e) => {
-      if (e.key === 'Escape' && !busy) onCancel()
-    }
-    document.addEventListener('keydown', onKey)
-    document.body.style.overflow = 'hidden'
-    confirmRef.current?.focus()
-    return () => {
-      document.removeEventListener('keydown', onKey)
-      document.body.style.overflow = ''
-    }
-  }, [order, busy, onCancel])
-
-  const spring = reduceMotion ? { duration: 0 } : { type: 'spring', stiffness: 420, damping: 32 }
-
-  return (
-    <AnimatePresence>
-      {order && (
-        <motion.div
-          className="fixed inset-0 z-50 flex items-end justify-center p-4 sm:items-center"
-          role="presentation"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          transition={{ duration: reduceMotion ? 0 : 0.2 }}
-        >
-          <motion.button
-            type="button"
-            aria-label="Close dialog"
-            className="absolute inset-0 bg-foreground/40 backdrop-blur-sm"
-            onClick={busy ? undefined : onCancel}
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-          />
-          <motion.div
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="cancel-order-title"
-            className="relative z-10 w-full max-w-md overflow-hidden rounded-xl border border-border bg-background shadow-2xl"
-            initial={reduceMotion ? false : { opacity: 0, y: 24, scale: 0.97 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={reduceMotion ? { opacity: 0 } : { opacity: 0, y: 16, scale: 0.98 }}
-            transition={spring}
-          >
-            <div className="border-b border-border bg-gradient-to-br from-red-50 to-background px-6 pb-5 pt-6">
-              <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-destructive/10 text-2xl text-destructive shadow-inner">
-                ⚠
-              </div>
-              <h2 id="cancel-order-title" className="text-xl font-bold tracking-tight">
-                Cancel this order?
-              </h2>
-              <p className="mt-1.5 text-sm text-muted-foreground">
-                Void{' '}
-                <span className="font-mono font-semibold text-brand-dark">
-                  {order.orderCode || 'this order'}
-                </span>
-                . It stays in records marked <span className="font-semibold">Cancelled</span> and
-                cannot be reopened.
-              </p>
-            </div>
-
-            <div className="space-y-4 px-6 py-5">
-              <dl className="grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
-                <div>
-                  <dt className="text-muted-foreground">Customer</dt>
-                  <dd className="font-medium">{order.customerName}</dd>
-                </div>
-                {order.table && (
-                  <div>
-                    <dt className="text-muted-foreground">Table</dt>
-                    <dd className="font-medium">{order.table}</dd>
-                  </div>
-                )}
-                <div className="col-span-2">
-                  <dt className="text-muted-foreground">Items</dt>
-                  <dd className="font-medium">{summariseItems(order)}</dd>
-                </div>
-              </dl>
-              {order.table && (
-                <div className="flex gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
-                  <span aria-hidden="true">🪑</span>
-                  <p>
-                    <span className="font-semibold">{order.table}</span> will be freed for the next
-                    guest.
-                  </p>
-                </div>
-              )}
-            </div>
-
-            <div className="flex flex-col-reverse gap-2 border-t border-border bg-muted/40 px-6 py-4 sm:flex-row sm:justify-end">
-              <Button variant="outline" className="sm:min-w-[7rem]" onClick={onCancel} disabled={busy}>
-                Keep order
-              </Button>
-              <button
-                ref={confirmRef}
-                type="button"
-                onClick={onConfirm}
-                disabled={busy}
-                className="inline-flex items-center justify-center rounded-md bg-destructive px-4 py-2.5 text-sm font-semibold text-destructive-foreground transition-colors hover:opacity-90 disabled:opacity-50 sm:min-w-[9rem]"
-              >
-                {busy ? 'Cancelling…' : 'Cancel order'}
-              </button>
-            </div>
-          </motion.div>
-        </motion.div>
-      )}
-    </AnimatePresence>
-  )
-}
-
-/** Small status pill: Active (open, occupies its table), Completed or Cancelled. */
 function StatusBadge({ status }) {
   const styles = {
-    completed: 'bg-green-100 text-green-700',
-    cancelled: 'bg-destructive/10 text-destructive',
-    active: 'bg-brand/10 text-brand-dark',
+    completed: { background: '#e2f1e0', color: '#39833f' },
+    cancelled: { background: '#f7e2dd', color: C.red },
+    active: { background: C.goldBg, color: '#b06514' },
   }
   const label = { completed: 'Completed', cancelled: 'Cancelled', active: 'Active' }
   const key = status === 'completed' || status === 'cancelled' ? status : 'active'
   return (
     <span
-      className={
-        'inline-block whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-semibold ' +
-        styles[key]
-      }
+      className="inline-block whitespace-nowrap rounded-full px-3 py-[5px] capitalize"
+      style={{ ...styles[key], fontSize: 11.5, fontWeight: 700, letterSpacing: '0.03em' }}
     >
       {label[key]}
     </span>
   )
 }
 
+/* -------------------------------- dialog -------------------------------- */
+
+function AdminConfirmModal({ order, tone, busy, onCancel, onConfirm }) {
+  const reduce = useReducedMotion()
+  const confirmRef = useRef(null)
+
+  useEffect(() => {
+    if (!order) return
+    const onKey = (e) => {
+      if (e.key === 'Escape' && !busy) onCancel()
+    }
+    document.addEventListener('keydown', onKey)
+    document.body.style.overflow = 'hidden'
+    confirmRef.current?.focus()
+    return () => {
+      document.removeEventListener('keydown', onKey)
+      document.body.style.overflow = ''
+    }
+  }, [order, busy, onCancel])
+
+  const complete = tone === 'complete'
+  const accent = complete ? C.green : C.red
+  const accentBg = complete ? '#e2f1e0' : '#f7e2dd'
+
+  return (
+    <AnimatePresence>
+      {order && (
+        <>
+          <motion.div
+            className="fixed inset-0 z-[60]"
+            style={{ background: 'rgba(35,22,16,0.5)' }}
+            onClick={busy ? undefined : onCancel}
+            aria-hidden="true"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: reduce ? 0 : 0.2 }}
+          />
+          <motion.div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="admin-confirm-title"
+            className="fixed left-1/2 top-1/2 z-[61] w-[calc(100%-40px)] max-w-md overflow-hidden rounded-[20px]"
+            style={{ background: C.cream, color: C.ink, x: '-50%', y: '-50%', boxShadow: '0 30px 70px rgba(0,0,0,0.35)' }}
+            initial={reduce ? { opacity: 0 } : { opacity: 0, scale: 0.94 }}
+            animate={reduce ? { opacity: 1 } : { opacity: 1, scale: 1 }}
+            exit={reduce ? { opacity: 0 } : { opacity: 0, scale: 0.96 }}
+            transition={reduce ? { duration: 0 } : { type: 'spring', stiffness: 420, damping: 30 }}
+          >
+            <div className="px-6 pb-5 pt-6" style={{ background: `linear-gradient(${accentBg}, ${C.cream})` }}>
+              <div
+                className="mb-3.5 flex h-12 w-12 items-center justify-center rounded-full text-2xl"
+                style={{ background: '#fff', color: accent, border: `1px solid ${accentBg}` }}
+              >
+                {complete ? '✓' : '⚠'}
+              </div>
+              <h2 id="admin-confirm-title" style={{ fontFamily: FONT_DISPLAY, fontWeight: 400, fontSize: 23, margin: 0 }}>
+                {complete ? 'Complete this order?' : 'Cancel this order?'}
+              </h2>
+              <p className="mt-1.5" style={{ fontSize: 14, color: C.brown }}>
+                {complete ? 'Mark ' : 'Void '}
+                <span style={{ fontFamily: FONT_MONO, fontWeight: 700, color: C.red }}>
+                  {order.orderCode || 'this order'}
+                </span>
+                {complete
+                  ? ' as done. This cannot be undone from admin.'
+                  : '. It stays in records marked Cancelled and cannot be reopened.'}
+              </p>
+            </div>
+
+            <div className="space-y-4 px-6 py-5">
+              <dl className="grid grid-cols-2 gap-x-4 gap-y-3" style={{ fontSize: 14 }}>
+                <Detail label="Customer" value={order.customerName} />
+                {complete && <Detail label="Phone" value={order.phone} mono />}
+                {order.table && <Detail label="Table" value={order.table} />}
+                {complete && <Detail label="Payment" value={order.paymentMode || '—'} />}
+                <div className="col-span-2">
+                  <dt style={{ color: C.brown2 }}>Items</dt>
+                  <dd style={{ fontWeight: 600 }}>{summariseItems(order)}</dd>
+                </div>
+              </dl>
+
+              {complete && (
+                <div
+                  className="flex items-center justify-between rounded-xl px-4 py-3"
+                  style={{ background: C.goldBg, border: `1px solid ${C.goldBorder}` }}
+                >
+                  <span style={{ fontSize: 14, color: C.brown }}>Amount collected</span>
+                  <span style={{ fontFamily: FONT_DISPLAY, fontSize: 20, color: C.red }}>
+                    {formatCurrency(order.total)}
+                  </span>
+                </div>
+              )}
+
+              {order.table && (
+                <div
+                  className="flex gap-3 rounded-xl px-4 py-3"
+                  style={{ background: accentBg, fontSize: 13.5, color: C.brown }}
+                >
+                  <span aria-hidden="true">🪑</span>
+                  <p style={{ margin: 0 }}>
+                    <b style={{ color: C.ink }}>{order.table}</b> will be freed for the next guest.
+                  </p>
+                </div>
+              )}
+            </div>
+
+            <div className="flex justify-end gap-2.5 px-6 pb-6 pt-1">
+              <button
+                type="button"
+                onClick={onCancel}
+                disabled={busy}
+                className="rounded-xl px-5 py-3 font-bold disabled:opacity-50"
+                style={{ border: `1.5px solid ${C.border2}`, background: '#fff', color: C.ink, fontSize: 14 }}
+              >
+                {complete ? 'Cancel' : 'Keep order'}
+              </button>
+              <button
+                ref={confirmRef}
+                type="button"
+                onClick={onConfirm}
+                disabled={busy}
+                className="rounded-xl px-5 py-3 font-bold text-white disabled:opacity-60"
+                style={{ background: accent, fontSize: 14 }}
+              >
+                {busy
+                  ? complete
+                    ? 'Completing…'
+                    : 'Cancelling…'
+                  : complete
+                    ? 'Complete Order'
+                    : 'Cancel order'}
+              </button>
+            </div>
+          </motion.div>
+        </>
+      )}
+    </AnimatePresence>
+  )
+}
+
+function Detail({ label, value, mono }) {
+  return (
+    <div>
+      <dt style={{ color: C.brown2 }}>{label}</dt>
+      <dd style={{ fontWeight: 600, fontFamily: mono ? FONT_MONO : 'inherit' }}>{value}</dd>
+    </div>
+  )
+}
+
+/* -------------------------------- helpers ------------------------------- */
+
+function normStatus(status) {
+  return status === 'completed' || status === 'cancelled' ? status : 'active'
+}
+
+function isToday(iso) {
+  const d = new Date(iso)
+  if (isNaN(d.getTime())) return false
+  return d.toDateString() === new Date().toDateString()
+}
+
 /** Short human summary of an order's pizzas, defensive against partial records. */
 function summariseItems(o) {
-  // Current model: an order has an `items` array of combos.
   if (Array.isArray(o.items) && o.items.length > 0) {
     return o.items
       .map((it) => {
@@ -674,18 +725,8 @@ function summariseItems(o) {
       })
       .join(', ')
   }
-  // Backward-compat: older single-combo records.
   const parts = []
   if (o.base?.name) parts.push(o.base.name)
   if (o.pizza?.name) parts.push(o.pizza.name)
   return parts.join(' · ') || '—'
-}
-
-function formatTime(iso) {
-  const d = new Date(iso)
-  if (isNaN(d.getTime())) return '—'
-  return d.toLocaleString('en-IN', {
-    dateStyle: 'medium',
-    timeStyle: 'short',
-  })
 }

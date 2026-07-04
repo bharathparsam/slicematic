@@ -25,3 +25,26 @@
 .noscroll {
   scrollbar-width: none;
 }
+
+/* Admin dashboard animations (used by the redesigned analytics/orders views). */
+@keyframes floatUp {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes drawBar {
+  from { transform: scaleY(0); }
+  to { transform: scaleY(1); }
+}
+@keyframes growW {
+  from { width: 0; }
+}
+.admin-row:hover {
+  background: #fdf7ec;
+}
+@media (prefers-reduced-motion: reduce) {
+  [style*='floatUp'],
+  [style*='drawBar'],
+  [style*='growW'] {
+    animation: none !important;
+  }
+}

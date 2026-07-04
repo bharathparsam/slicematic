@@ -20,13 +20,9 @@ export default function App() {
   // Admin unlock lives here so it survives the Modify round-trip (Admin unmounts
   // while an order is edited in the Order view).
   const [adminUnlocked, setAdminUnlocked] = useState(false)
-  // The order-flow landing (table select) is a full-bleed branded screen with its
-  // own top bar, so OrderFlow asks us to hide the generic app chrome while it's up.
-  const [showChrome, setShowChrome] = useState(true)
 
   function goToView(next) {
     setEditingOrder(null) // switching tabs abandons any in-progress modify
-    setShowChrome(true)
     setView(next)
   }
   function startModify(order) {
@@ -38,88 +34,25 @@ export default function App() {
     setView('admin')
   }
 
+  // Each view is full-bleed and brings its own branded top bar (no generic chrome).
   return (
     <div className="min-h-screen">
-      {showChrome && <Header view={view} setView={goToView} />}
-      <main
-        className={
-          'mx-auto w-full ' +
-          (view === 'admin'
-            ? 'max-w-none px-4 py-6'
-            : showChrome
-              ? 'max-w-3xl px-4 py-6'
-              : 'px-3 py-4')
-        }
-      >
-        {view === 'order' ? (
-          <OrderFlow
-            key={editingOrder ? editingOrder.id : 'new'}
-            editingOrder={editingOrder}
-            onDoneEditing={doneEditing}
-            onChrome={setShowChrome}
-            onAdmin={() => goToView('admin')}
-          />
-        ) : (
-          <AdminOrdersTable
-            onModify={startModify}
-            unlocked={adminUnlocked}
-            onUnlock={() => setAdminUnlocked(true)}
-          />
-        )}
-      </main>
-      {showChrome && (
-        <footer
-          className={
-            'mx-auto px-4 pb-8 pt-2 text-center text-xs text-muted-foreground ' +
-            (view === 'admin' ? 'max-w-none' : 'max-w-3xl')
-          }
-        >
-          SliceMatic MVP · orders via API · Delhi
-        </footer>
+      {view === 'order' ? (
+        <OrderFlow
+          key={editingOrder ? editingOrder.id : 'new'}
+          editingOrder={editingOrder}
+          onDoneEditing={doneEditing}
+          onAdmin={() => goToView('admin')}
+        />
+      ) : (
+        <AdminOrdersTable
+          onModify={startModify}
+          onExit={() => goToView('order')}
+          unlocked={adminUnlocked}
+          onUnlock={() => setAdminUnlocked(true)}
+        />
       )}
     </div>
-  )
-}
-
-function Header({ view, setView }) {
-  const tabs = [
-    { id: 'order', label: 'Order' },
-    { id: 'admin', label: 'Admin' },
-  ]
-  return (
-    <header className="sticky top-0 z-10 border-b border-border bg-background/95 backdrop-blur">
-      <div
-        className={
-          'mx-auto flex items-center justify-between px-4 py-3 ' +
-          (view === 'admin' ? 'max-w-none' : 'max-w-3xl')
-        }
-      >
-        <div className="flex items-center gap-2">
-          <span className="text-2xl" aria-hidden="true">🍕</span>
-          <div>
-            <h1 className="text-lg font-extrabold tracking-tight">SliceMatic</h1>
-            <p className="text-xs text-muted-foreground">Order desk</p>
-          </div>
-        </div>
-        <nav aria-label="Views" className="flex gap-1 rounded-lg bg-muted p-1">
-          {tabs.map((t) => (
-            <button
-              key={t.id}
-              onClick={() => setView(t.id)}
-              aria-current={view === t.id ? 'page' : undefined}
-              className={
-                'rounded-md px-4 py-1.5 text-sm font-semibold transition-colors ' +
-                (view === t.id
-                  ? 'bg-background text-foreground shadow-sm'
-                  : 'text-muted-foreground hover:text-foreground')
-              }
-            >
-              {t.label}
-            </button>
-          ))}
-        </nav>
-      </div>
-    </header>
   )
 }
 
@@ -166,7 +99,7 @@ function resolveCartFromOrder(order, menu) {
   }))
 }
 
-function OrderFlow({ editingOrder = null, onDoneEditing, onChrome, onAdmin }) {
+function OrderFlow({ editingOrder = null, onDoneEditing, onAdmin }) {
   const isEditing = !!editingOrder
 
   // --- Load state (menu required; tax + tables self-default) ----------
@@ -239,14 +172,6 @@ function OrderFlow({ editingOrder = null, onDoneEditing, onChrome, onAdmin }) {
   useEffect(() => {
     refreshOccupancy()
   }, [])
-
-  // The whole customer order flow (table landing + order screen) is branded and
-  // full-bleed with its own top bar, so hide App's generic chrome for the duration
-  // and restore it when we leave for Admin.
-  useEffect(() => {
-    onChrome?.(false)
-    return () => onChrome?.(true)
-  }, [onChrome])
 
   // Re-show the table screen (new order / change table), always with fresh occupancy.
   function goToTableStage() {
