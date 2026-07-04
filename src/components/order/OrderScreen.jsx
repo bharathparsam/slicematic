@@ -26,6 +26,7 @@ const SAVING_QUIPS = [
  */
 export default function OrderScreen({
   menu,
+  soldOut,
   taxConfig,
   table,
   label,
@@ -168,43 +169,75 @@ export default function OrderScreen({
           Tap a pizza to pick a base and toppings.
         </p>
         <div className="grid grid-cols-2 gap-3">
-          {pizzas.map((p) => (
-            <button
-              key={p.id}
-              type="button"
-              onClick={() => openCustomize(p)}
-              className="flex flex-col rounded-2xl p-[11px] text-left transition-transform active:scale-[0.98]"
-              style={{ background: '#fff', border: `1px solid ${C.border}`, boxShadow: `0 2px 0 ${C.border}` }}
-            >
-              <div
-                className="relative mb-[11px] flex aspect-square items-center justify-center overflow-hidden rounded-xl text-3xl"
-                style={{ background: 'repeating-linear-gradient(135deg,#efdcc0,#efdcc0 8px,#e9d3b2 8px,#e9d3b2 16px)' }}
-                aria-hidden="true"
+          {pizzas.map((p) => {
+            const isSold = !!soldOut?.pizzas?.has?.(p.id)
+            return (
+              <button
+                key={p.id}
+                type="button"
+                onClick={() => !isSold && openCustomize(p)}
+                disabled={isSold}
+                aria-disabled={isSold || undefined}
+                className="flex flex-col rounded-2xl p-[11px] text-left transition-transform active:scale-[0.98] disabled:active:scale-100"
+                style={{
+                  background: '#fff',
+                  border: `1px solid ${C.border}`,
+                  boxShadow: `0 2px 0 ${C.border}`,
+                  opacity: isSold ? 0.6 : 1,
+                  cursor: isSold ? 'not-allowed' : 'pointer',
+                }}
               >
-                🍕
-                {inCart[p.id] ? (
-                  <span
-                    className="absolute right-[7px] top-[7px] flex h-5 w-5 items-center justify-center rounded-full text-white"
-                    style={{ background: C.green, fontSize: 10, fontWeight: 800 }}
-                  >
-                    {inCart[p.id]}
-                  </span>
-                ) : null}
-              </div>
-              <div style={{ fontSize: 15, fontWeight: 800, color: C.ink, lineHeight: 1.15 }}>{p.name}</div>
-              <div className="mt-1.5 flex items-center justify-between">
-                <span style={{ fontSize: 12.5, color: C.brown2, fontWeight: 600 }}>
-                  from {formatCurrency(p.price + minBasePrice)}
-                </span>
-                <span
-                  className="flex h-[26px] w-[26px] items-center justify-center rounded-lg leading-none"
-                  style={{ background: C.red, color: C.cream, fontSize: 18, fontWeight: 700 }}
+                <div
+                  className="relative mb-[11px] flex aspect-square items-center justify-center overflow-hidden rounded-xl text-3xl"
+                  style={{
+                    background: 'repeating-linear-gradient(135deg,#efdcc0,#efdcc0 8px,#e9d3b2 8px,#e9d3b2 16px)',
+                    filter: isSold ? 'grayscale(1)' : 'none',
+                  }}
+                  aria-hidden="true"
                 >
-                  +
-                </span>
-              </div>
-            </button>
-          ))}
+                  🍕
+                  {isSold ? (
+                    <span
+                      className="absolute inset-x-0 bottom-0 py-1 text-center uppercase"
+                      style={{
+                        background: 'rgba(58,36,24,0.82)',
+                        color: C.cream,
+                        fontSize: 10,
+                        fontWeight: 800,
+                        letterSpacing: '0.08em',
+                      }}
+                    >
+                      Sold out
+                    </span>
+                  ) : inCart[p.id] ? (
+                    <span
+                      className="absolute right-[7px] top-[7px] flex h-5 w-5 items-center justify-center rounded-full text-white"
+                      style={{ background: C.green, fontSize: 10, fontWeight: 800 }}
+                    >
+                      {inCart[p.id]}
+                    </span>
+                  ) : null}
+                </div>
+                <div style={{ fontSize: 15, fontWeight: 800, color: C.ink, lineHeight: 1.15 }}>{p.name}</div>
+                <div className="mt-1.5 flex items-center justify-between">
+                  <span style={{ fontSize: 12.5, color: C.brown2, fontWeight: 600 }}>
+                    {isSold ? 'Unavailable' : `from ${formatCurrency(p.price + minBasePrice)}`}
+                  </span>
+                  <span
+                    className="flex h-[26px] w-[26px] items-center justify-center rounded-lg leading-none"
+                    style={{
+                      background: isSold ? C.disabledBg : C.red,
+                      color: isSold ? C.disabledFg : C.cream,
+                      fontSize: 18,
+                      fontWeight: 700,
+                    }}
+                  >
+                    +
+                  </span>
+                </div>
+              </button>
+            )
+          })}
         </div>
       </section>
 
@@ -244,6 +277,8 @@ export default function OrderScreen({
         pizza={activePizza}
         bases={menu?.bases ?? []}
         toppings={menu?.toppings ?? []}
+        soldOutBases={soldOut?.bases}
+        soldOutToppings={soldOut?.toppings}
         taxConfig={taxConfig}
         onClose={() => setSheet(null)}
         onAdd={handleAdd}

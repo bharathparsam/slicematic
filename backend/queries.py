@@ -190,6 +190,60 @@ def create_store_table(table_number: str, label_prefix: str = 'Table') -> dict:
     return {'id': row['id'], 'label': row['label']}
 
 
+def list_menu_availability(item_type: str = 'pizza') -> list[dict]:
+    '''Availability overlay rows for a menu item type. Only toggled items have a
+    row; the frontend treats any id without a row (or is_sold_out=false) as
+    available.'''
+    with db_cursor() as (_, cur):
+        store_id = ensure_store(cur)
+        cur.execute(
+            '''
+            SELECT item_id, item_name, is_sold_out
+            FROM menu_availability
+            WHERE store_id = %s AND item_type = %s
+            ORDER BY item_id
+            ''',
+            (store_id, item_type),
+        )
+        rows = cur.fetchall()
+
+    return [
+        {
+            'item_id': row['item_id'],
+            'item_name': row['item_name'],
+            'is_sold_out': row['is_sold_out'],
+        }
+        for row in rows
+    ]
+
+
+def set_menu_availability(
+    item_id: str, is_sold_out: bool, item_type: str = 'pizza', item_name: str | None = None
+) -> dict:
+    '''Upsert one item's sold-out flag, keyed by (store, type, id).'''
+    with db_cursor() as (_, cur):
+        store_id = ensure_store(cur)
+        cur.execute(
+            '''
+            INSERT INTO menu_availability (store_id, item_type, item_id, item_name, is_sold_out)
+            VALUES (%s, %s, %s, %s, %s)
+            ON CONFLICT (store_id, item_type, item_id) DO UPDATE
+              SET is_sold_out = EXCLUDED.is_sold_out,
+                  item_name   = COALESCE(EXCLUDED.item_name, menu_availability.item_name),
+                  updated_at  = now()
+            RETURNING item_id, item_name, is_sold_out
+            ''',
+            (store_id, item_type, item_id, item_name, is_sold_out),
+        )
+        row = cur.fetchone()
+
+    return {
+        'item_id': row['item_id'],
+        'item_name': row['item_name'],
+        'is_sold_out': row['is_sold_out'],
+    }
+
+
 def complete_order(order_public_id: str) -> dict:
     with db_cursor() as (_, cur):
         cur.execute(

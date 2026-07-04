@@ -13,6 +13,7 @@ import { validateName, validatePhone } from '@/lib/validators'
 import { computeOrderBill } from '@/lib/billing'
 import { saveOrder, updateOrder, getOccupiedTables } from '@/lib/orderStore'
 import { listTables, mergeTableLabels } from '@/lib/tableStore'
+import { getAllSoldOut } from '@/lib/menuStore'
 import { getSession, onAuthChange } from '@/lib/auth'
 
 export default function App() {
@@ -122,6 +123,12 @@ function OrderFlow({ editingOrder = null, onDoneEditing, onAdmin }) {
 
   // --- Load state (menu required; tax + tables self-default) ----------
   const [menu, setMenu] = useState(null)
+  // Sold-out ids per menu type: { pizzas, bases, toppings } (each a Set).
+  const [soldOut, setSoldOut] = useState(() => ({
+    pizzas: new Set(),
+    bases: new Set(),
+    toppings: new Set(),
+  }))
   const [taxConfig, setTaxConfig] = useState(DEFAULT_TAX_CONFIG)
   const [tables, setTables] = useState(DEFAULT_TABLES.tables)
   const [tableLabel, setTableLabel] = useState(DEFAULT_TABLES.label)
@@ -140,8 +147,14 @@ function OrderFlow({ editingOrder = null, onDoneEditing, onAdmin }) {
     setLoading(true)
     setLoadError('')
     try {
-      const [data, cfg, tbl] = await Promise.all([loadAllMenus(), loadTaxConfig(), loadTables()])
+      const [data, cfg, tbl, sold] = await Promise.all([
+        loadAllMenus(),
+        loadTaxConfig(),
+        loadTables(),
+        getAllSoldOut(),
+      ])
       setMenu(data)
+      setSoldOut(sold)
       setTaxConfig(cfg)
       setTableLabel(tbl.label)
       setTables(await loadTablesFromApi(tbl))
@@ -169,6 +182,14 @@ function OrderFlow({ editingOrder = null, onDoneEditing, onAdmin }) {
   // --- Stage: pick a table, then order (editing skips table select) ---
   const [stage, setStage] = useState(isEditing ? 'order' : 'table') // 'table' | 'order'
   const [table, setTable] = useState(editingOrder?.table ?? '')
+
+  // No router = the window keeps its scroll position across stage swaps. After
+  // "Start ordering" the user is usually scrolled down the table list, so the
+  // next screen would open mid-page. Reset to the top on every stage change
+  // (both table→order and the "Change table" trip back).
+  useEffect(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: 'auto' })
+  }, [stage])
 
   // Tables with an open (active) order — blocked until admin completes/cancels.
   const [occupiedTables, setOccupiedTables] = useState([])
@@ -408,6 +429,7 @@ function OrderFlow({ editingOrder = null, onDoneEditing, onAdmin }) {
   return (
     <OrderScreen
       menu={menu}
+      soldOut={soldOut}
       taxConfig={taxConfig}
       table={table}
       label={tableLabel}

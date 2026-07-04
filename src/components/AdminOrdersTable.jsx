@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { motion, AnimatePresence, useReducedMotion } from 'framer-motion'
 import AdminAnalytics from '@/components/AdminAnalytics'
 import AdminChat from '@/components/AdminChat'
+import AdminMenu from '@/components/AdminMenu'
 import { getAllOrders, completeOrder, cancelOrder } from '@/lib/orderStore'
 import { formatCurrency } from '@/lib/billing'
 import { signIn, signOut, isSupabaseConfigured } from '@/lib/auth'
@@ -16,7 +17,8 @@ const FILTERS = [
 ]
 
 // Orders table column template (kept in sync between the header + body rows).
-const GRID = '96px 100px 72px 1.3fr 1.8fr 48px 108px 66px 168px'
+// The last track fits the Complete · Modify · Cancel actions on one row.
+const GRID = '96px 100px 72px 1.3fr 1.8fr 48px 108px 66px 232px'
 
 export default function AdminOrdersTable({ onModify, onExit, session, authReady }) {
   const [orders, setOrders] = useState([])
@@ -142,6 +144,8 @@ export default function AdminOrdersTable({ onModify, onExit, session, authReady 
               <AdminAnalytics />
             ) : section === 'chat' ? (
               <AdminChat />
+            ) : section === 'menu' ? (
+              <AdminMenu />
             ) : (
               <OrdersPanel
                 orders={filtered}
@@ -184,18 +188,18 @@ function TopBar({ onExit, authed, email, onSignOut }) {
         <div style={{ lineHeight: 1.15 }}>
           <div style={{ fontFamily: FONT_DISPLAY, fontSize: 21 }}>SliceMatic</div>
           <div className="uppercase" style={{ fontSize: 10.5, letterSpacing: '0.16em', color: '#c8a883', fontWeight: 600 }}>
-            Order Desk · Admin
+            You are the boss, make changes as you wish
           </div>
         </div>
       </div>
       <div className="flex items-center gap-3 sm:gap-4">
-        <div className="hidden items-center gap-2 sm:flex" style={{ fontSize: 13, color: '#d9c6a6', fontWeight: 600 }}>
+        {/* <div className="hidden items-center gap-2 sm:flex" style={{ fontSize: 13, color: '#d9c6a6', fontWeight: 600 }}>
           <span
             className="h-2 w-2 rounded-full"
             style={{ background: '#5ec26b', boxShadow: '0 0 0 4px rgba(94,194,107,0.2)' }}
           />
           Live · Asia/Kolkata
-        </div>
+        </div> */}
         <div className="flex rounded-full p-1" style={{ background: '#3a2418' }}>
           <button
             type="button"
@@ -241,6 +245,7 @@ function TopBar({ onExit, authed, email, onSignOut }) {
 function Sidebar({ section, setSection, activeCount, todaySales, todayOrders, todayAvg }) {
   const items = [
     { key: 'orders', icon: '📋', label: 'Orders', badge: activeCount || '' },
+    { key: 'menu', icon: '🍕', label: 'Alter Menu', badge: '' },
     { key: 'analytics', icon: '📊', label: 'Analytics', badge: '' },
     { key: 'chat', icon: '🤖', label: 'Ask COO', badge: '' },
   ]
@@ -504,7 +509,7 @@ function OrdersPanel({
         style={{ background: '#fff', border: `1px solid ${C.border}`, boxShadow: `0 4px 0 ${C.border}` }}
       >
         <div className="overflow-x-auto">
-          <div style={{ minWidth: 980 }}>
+          <div style={{ minWidth: 1044 }}>
             {/* header */}
             <div
               className="grid items-center gap-3.5 px-6 py-4 uppercase"
@@ -577,7 +582,7 @@ function OrdersPanel({
                       {formatCurrency(o.total)}
                     </div>
                     <div style={{ fontSize: 13, color: C.brown, fontWeight: 600 }}>{o.paymentMode}</div>
-                    <div className="flex justify-end gap-1.5">
+                    <div className="flex flex-nowrap justify-end gap-1.5">
                       {active ? (
                         <>
                           <RowAction tone="green" onClick={() => onComplete(o)} disabled={completingId === o.id}>
@@ -617,7 +622,7 @@ function RowAction({ tone, onClick, disabled, children }) {
       type="button"
       onClick={onClick}
       disabled={disabled}
-      className="whitespace-nowrap rounded-lg px-2.5 py-1.5 font-bold transition-colors disabled:opacity-50"
+      className="shrink-0 whitespace-nowrap rounded-lg px-2.5 py-1.5 font-bold transition-colors disabled:opacity-50"
       style={{ border: `1.5px solid ${t.border}`, background: '#fff', color: t.color, fontSize: 12 }}
     >
       {children}

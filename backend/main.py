@@ -13,12 +13,14 @@ from models import (
     CompleteOrderResponse,
     CreateOrderRequest,
     CreateOrderResponse,
+    MenuAvailabilityResponse,
     NewTableRequest,
     NewTableResponse,
     OrderOut,
     OrdersPerHourResponse,
     PaymentMixResponse,
     SalesDailyResponse,
+    SetAvailabilityRequest,
     TableOut,
     TopProductsResponse,
 )
@@ -30,11 +32,13 @@ from queries import (
     complete_order,
     create_order,
     create_store_table,
+    list_menu_availability,
     list_orders,
     list_store_tables,
     orders_per_hour,
     payment_mix,
     sales_daily,
+    set_menu_availability,
     top_products,
     update_order,
 )
@@ -158,6 +162,34 @@ def new_table_api(payload: NewTableRequest):
         return create_store_table(payload.table_number)
     except TableAlreadyExistsError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except OperationalError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=f'Database unavailable: {exc}',
+        ) from exc
+
+
+@app.get('/api/menu/availability', response_model=MenuAvailabilityResponse)
+def menu_availability_api(item_type: str = 'pizza'):
+    try:
+        return MenuAvailabilityResponse(items=list_menu_availability(item_type))
+    except OperationalError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=f'Database unavailable: {exc}',
+        ) from exc
+
+
+@app.post('/api/menu/set_availability', response_model=MenuAvailabilityResponse)
+def set_menu_availability_api(payload: SetAvailabilityRequest):
+    try:
+        set_menu_availability(
+            payload.item_id,
+            payload.is_sold_out,
+            payload.item_type,
+            payload.item_name,
+        )
+        return MenuAvailabilityResponse(items=list_menu_availability(payload.item_type))
     except OperationalError as exc:
         raise HTTPException(
             status_code=503,

@@ -172,6 +172,23 @@ class PaymentMixResponse(BaseModel):
     methods: list[PaymentMixEntry]
 
 
+class MenuAvailabilityItem(BaseModel):
+    item_id: str
+    item_name: str | None = None
+    is_sold_out: bool = False
+
+
+class MenuAvailabilityResponse(BaseModel):
+    items: list[MenuAvailabilityItem] = Field(default_factory=list)
+
+
+class SetAvailabilityRequest(BaseModel):
+    item_id: str = Field(..., min_length=1, max_length=120)
+    is_sold_out: bool
+    item_type: str = Field(default='pizza', max_length=20)
+    item_name: str | None = Field(default=None, max_length=120)
+
+
 class ChatTurn(BaseModel):
     role: Literal['user', 'assistant']
     content: str = Field(..., min_length=1, max_length=4000)

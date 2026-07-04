@@ -49,12 +49,12 @@ const STEPS = [
   {
     n: '1',
     title: 'Grab a seat',
-    body: 'Walk in, find a table you like, and note its number — no host, no waiting.',
+    body: 'We know you are hungry, please grab your seat.',
   },
   {
     n: '2',
     title: 'Build your order',
-    body: 'Tap your table below, then design your pizza right here — crust, sauce, the works.',
+    body: 'Tap your table below, then craft your pizza right here - crust, sauce, the works.',
   },
   {
     n: '3',
@@ -155,7 +155,7 @@ export default function TableSelect({
               className="font-semibold uppercase"
               style={{ fontSize: 10, letterSpacing: '0.12em', color: C.gold }}
             >
-              Order Desk · Delhi
+              Delhi
             </div>
           </div>
         </div>

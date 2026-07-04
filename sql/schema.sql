@@ -318,6 +318,29 @@ create table order_feedback (
   unique (order_id)
 );
 
+-- ===========================================================================
+-- MENU AVAILABILITY  (sold-out toggles for the admin Menu tab)
+-- ===========================================================================
+-- The live menu is served from the public/data/*.txt files, keyed by a stable
+-- id per line (e.g. 'P1'). This table records ONLY the mutable availability
+-- overlay for those ids — a row exists once an item has been toggled. Absence
+-- of a row means "available". Decoupled from menu_units (which is order-derived)
+-- so it works for items that have never been ordered.
+--
+-- >>> INCREMENTAL MIGRATION: to add this to an already-deployed database, run
+-- >>> JUST this one CREATE TABLE (+ its trigger below) in the Supabase SQL
+-- >>> editor. It is purely additive — no existing table/row is touched.
+create table menu_availability (
+  id            bigint generated always as identity primary key,
+  store_id      bigint not null references stores(id),
+  item_type     menu_item_type not null,           -- 'pizza' today
+  item_id       text not null,                      -- stable menu-file id, e.g. 'P1'
+  item_name     text,                               -- snapshot for admin display
+  is_sold_out   boolean not null default false,
+  updated_at    timestamptz not null default now(),
+  unique (store_id, item_type, item_id)
+);
+
 -- ---------------------------------------------------------------------------
 -- updated_at triggers
 -- ---------------------------------------------------------------------------
@@ -328,6 +351,7 @@ create trigger t_tables_updated     before update on store_tables   for each row
 create trigger t_sessions_updated   before update on table_sessions for each row execute function set_updated_at();
 create trigger t_units_updated      before update on menu_units     for each row execute function set_updated_at();
 create trigger t_orders_updated     before update on orders         for each row execute function set_updated_at();
+create trigger t_menu_avail_updated before update on menu_availability for each row execute function set_updated_at();
 
 -- ---------------------------------------------------------------------------
 -- Indexes tuned for the dashboards
