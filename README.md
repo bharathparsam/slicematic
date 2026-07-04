@@ -5,14 +5,26 @@ build one or more pizza combos (base + pizza + toppings + quantity), add each to
 the order, see an itemised bill with bulk discount and GST, pick a payment method,
 and confirm. Staff review all orders in an Admin view.
 
-**Stage 1 — front-end only.** No backend: state is in React and orders persist to
-`localStorage`. Supabase + an AI "COO" insights feature come in later stages.
+Orders are persisted via a **Python + PostgreSQL backend** (`backend/`). The React
+app talks to it through `src/lib/orderStore.js` (the persistence seam).
 
 ## Quick start
+
+**Frontend only** (requires the API running for save/list to work):
 
 ```bash
 npm install
 npm run dev        # → http://localhost:5173
+```
+
+**Full stack** — run both terminals (set up the database first — see below):
+
+```bash
+# Terminal 1 — API (see Database setup + Backend setup below)
+npm run api
+
+# Terminal 2 — React
+npm run dev
 ```
 
 Other commands:
@@ -20,9 +32,214 @@ Other commands:
 ```bash
 npm run build      # production build
 npm test           # unit tests (Vitest) over the pure logic in src/lib
+npm run api:setup  # create backend venv + install Python deps (first time)
+npm run api        # start FastAPI on http://localhost:8000
 ```
 
 Admin tab uses a placeholder password: **`slice123`** (client-side gate only, not real auth).
+
+## Database setup
+
+The API stores orders in **PostgreSQL 14+**. Schema lives in
+[`sql/schema.sql`](./sql/schema.sql) — apply it once before starting the API.
+
+```
+React (5173)  →  /api/* proxy  →  FastAPI (8000)  →  PostgreSQL (slicematic)
+```
+
+The React app never talks to Postgres directly; only the Python API does, via
+`DATABASE_URL` in `backend/.env`.
+
+### Install PostgreSQL
+
+**macOS (Homebrew):**
+
+```bash
+brew install postgresql@16
+brew services start postgresql@16
+```
+
+If `createdb` or `psql` are not found, add Postgres to your PATH (Apple Silicon
+example):
+
+```bash
+export PATH="/opt/homebrew/opt/postgresql@16/bin:$PATH"
+```
+
+**Linux (Debian/Ubuntu):**
+
+```bash
+sudo apt update && sudo apt install postgresql postgresql-contrib
+sudo systemctl start postgresql
+```
+
+**Windows:** install from [postgresql.org](https://www.postgresql.org/download/windows/)
+and use `psql` from the Start menu shell.
+
+**Supabase / hosted Postgres:** skip local install — create a project, copy the
+connection string, and put it in `backend/.env` as `DATABASE_URL` (see step 3).
+
+### 1. Create the database
+
+From the repo root:
+
+```bash
+createdb slicematic
+psql -d slicematic -f sql/schema.sql
+```
+
+This creates all tables, seeds `order_statuses`, and sets up reporting views.
+You only need to run this once (re-run only when resetting a dev database).
+
+**Verify the schema loaded:**
+
+```bash
+psql -d slicematic -c "\dt"
+```
+
+You should see tables such as `orders`, `order_items`, `store_tables`, and
+`order_statuses`.
+
+**Test a connection manually:**
+
+```bash
+psql -d slicematic -c "SELECT count(*) FROM order_statuses;"
+```
+
+### 2. Create a Postgres user (optional)
+
+The example URL uses user `postgres` with password `postgres`. Homebrew Postgres
+on macOS often uses your **macOS username** with no password instead:
+
+```bash
+whoami   # e.g. rakeshpelluri
+psql -d slicematic -c "SELECT current_user;"
+```
+
+If you need a dedicated role:
+
+```bash
+psql postgres -c "CREATE USER slicematic WITH PASSWORD 'your_password';"
+psql postgres -c "GRANT ALL PRIVILEGES ON DATABASE slicematic TO slicematic;"
+```
+
+### 3. Configure `DATABASE_URL`
+
+```bash
+cp backend/.env.example backend/.env
+```
+
+Edit `backend/.env` to match your local Postgres credentials:
+
+```
+DATABASE_URL=postgresql://postgres:postgres@localhost:5432/slicematic
+STORE_NAME=SliceMatic Delhi
+```
+
+URL format: `postgresql://USER:PASSWORD@HOST:PORT/DATABASE`
+
+Common local variants:
+
+```
+# Homebrew default — macOS user, no password
+DATABASE_URL=postgresql://YOUR_MAC_USER@localhost:5432/slicematic
+
+# Dedicated role
+DATABASE_URL=postgresql://slicematic:your_password@localhost:5432/slicematic
+
+# Supabase / remote
+DATABASE_URL=postgresql://user:pass@db.xxxx.supabase.co:5432/postgres
+```
+
+`backend/.env` is **gitignored** — never commit real passwords. If `.env` is
+missing, the API falls back to `postgresql://postgres:postgres@localhost:5432/slicematic`
+(see `backend/db.py`).
+
+### Reset the database (dev only)
+
+To wipe and recreate from scratch:
+
+```bash
+dropdb slicematic
+createdb slicematic
+psql -d slicematic -f sql/schema.sql
+```
+
+### Database troubleshooting
+
+| Symptom | Likely fix |
+|--------|------------|
+| `createdb: command not found` | Install Postgres or fix your PATH |
+| `connection refused` | Start Postgres (`brew services start postgresql@16` or `sudo systemctl start postgresql`) |
+| `database "slicematic" does not exist` | Run `createdb slicematic` |
+| `relation "orders" does not exist` | Run `psql -d slicematic -f sql/schema.sql` |
+| `password authentication failed` | Fix user/password in `backend/.env` |
+| Empty Admin list, 500s in API logs | Schema not applied or wrong database in `DATABASE_URL` |
+| `Database unavailable` on order submit | Postgres not running, DB missing, or bad `DATABASE_URL` |
+
+## Backend setup
+
+The API lives in `backend/` — **FastAPI** + **psycopg2**. Complete
+[Database setup](#database-setup) first.
+
+### Prerequisites
+
+- **Python 3.11+**
+- **PostgreSQL 14+** with `slicematic` created and schema applied (or Supabase)
+
+### 1. Install Python dependencies
+
+One-time setup (creates `backend/.venv`):
+
+```bash
+npm run api:setup
+```
+
+Or manually:
+
+```bash
+cd backend
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+### 2. Start the server
+
+From the repo root:
+
+```bash
+npm run api
+```
+
+- API base: http://localhost:8000
+- Interactive docs: http://localhost:8000/docs
+- Health check: http://localhost:8000/health
+
+In dev, Vite proxies `/api` → `http://localhost:8000` (see `vite.config.js`), so
+the React app can call `/api/orders` without CORS setup.
+
+To point the frontend at a different host:
+
+```bash
+VITE_API_URL=http://localhost:8000 npm run dev
+```
+
+### API endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/health` | Health check |
+| `POST` | `/api/orders` | Create an order (returns UUID `order_id`) |
+| `GET` | `/api/orders` | List all orders, newest first |
+
+### Troubleshooting
+
+- **API won't start** — run `npm run api:setup` first, then `npm run api`.
+- **Empty Admin list but orders exist** — check the API terminal for 500 errors;
+  see [Database troubleshooting](#database-troubleshooting).
+- **`Database unavailable` on submit** — Postgres is not running, the database
+  does not exist, or `DATABASE_URL` in `backend/.env` is wrong.
 
 ## Menu data
 
@@ -56,9 +273,11 @@ change, no rebuild.
 ## Project structure
 
 ```
+backend/                 Python FastAPI server + Postgres queries
+sql/schema.sql           PostgreSQL schema (apply before first run)
 public/data/*.txt        Menu source files (swappable)
-src/lib/                  Pure, tested business logic (parsing, validation, billing, storage)
-src/components/           UI: intake, menu, summary, payment, admin + shadcn-style primitives
+src/lib/                 Pure, tested business logic + orderStore API seam
+src/components/          UI: intake, menu, summary, payment, admin + shadcn-style primitives
 src/App.jsx              Flow orchestration + Order/Admin tab toggle
 ```
 
@@ -67,4 +286,4 @@ conventions — read it before contributing (and it primes Claude Code for this 
 
 ## Tech
 
-Vite · React · Tailwind CSS · shadcn/ui idiom · Vitest.
+Vite · React · Tailwind CSS · shadcn/ui idiom · Vitest · FastAPI · PostgreSQL.

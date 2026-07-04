@@ -4,5 +4,14 @@ dist
 *.local
 .DS_Store
 
+# Python backend
+backend/.env
+backend/.venv
+backend/__pycache__
+backend/**/__pycache__
+
 # Per-developer Claude Code settings (local overrides, not shared)
 .claude/settings.local.json
+
+# Never commit real env files (templates like .env.example are fine)
+.env

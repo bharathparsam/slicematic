@@ -1,156 +1,234 @@
 // orderStore.js
-// The persistence seam. Components NEVER touch localStorage directly — they go
-// through saveOrder / getAllOrders. To move to Supabase later, only this file
-// changes: swap the bodies for async supabase.from('orders')... calls and make
-// the callers await them. The interface (order in, orders out) stays the same.
+// The persistence seam. Components NEVER talk to fetch/localStorage directly —
+// they go through saveOrder / getAllOrders. Backed by the Python API in /backend.
 
-const STORAGE_KEY = 'slicematic_orders'
+import { round2 } from './billing'
 
-/** Safely read the raw array from localStorage. Never throws. */
-function readAll() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY)
-    if (!raw) return []
-    const parsed = JSON.parse(raw)
-    return Array.isArray(parsed) ? parsed : []
-  } catch (err) {
-    console.warn('[orderStore] could not read/parse orders — starting empty', err)
-    return []
+const API_BASE = import.meta.env.VITE_API_URL ?? ''
+
+async function apiFetch(path, options = {}) {
+  const res = await fetch(`${API_BASE}${path}`, {
+    headers: { 'Content-Type': 'application/json', ...options.headers },
+    ...options,
+  })
+
+  if (!res.ok) {
+    let detail = res.statusText
+    try {
+      const body = await res.json()
+      if (typeof body.detail === 'string') detail = body.detail
+      else if (Array.isArray(body.detail)) detail = body.detail.map((d) => d.msg).join(', ')
+    } catch {
+      /* keep statusText */
+    }
+    throw new Error(detail || 'Request failed')
+  }
+
+  if (res.status === 204) return null
+  return res.json()
+}
+
+function paymentToApi(mode) {
+  return (mode ?? '').toLowerCase()
+}
+
+function paymentFromApi(mode) {
+  if (!mode) return ''
+  return mode.charAt(0).toUpperCase() + mode.slice(1)
+}
+
+/** Map a saved frontend order record to the POST /api/orders body. */
+function toCreatePayload(order) {
+  return {
+    name: order.customerName,
+    phone: order.phone,
+    table: order.table || null,
+    payment_type: paymentToApi(order.paymentMode),
+    items: (order.items ?? []).map((it) => {
+      const lineSubtotal = it.lineSubtotal ?? 0
+      const lineDiscount = it.lineDiscount ?? 0
+      const taxable = round2(lineSubtotal - lineDiscount)
+      const qty = it.quantity ?? 1
+      return {
+        pizza_type: it.pizza?.name ?? '',
+        base: it.base?.name ?? '',
+        toppings: (it.toppings ?? []).map((t) => t.name),
+        quantity: qty,
+        price_wo_gst: round2(taxable / qty),
+        line_discount: lineDiscount,
+        gst: it.lineGst ?? 0,
+      }
+    }),
+  }
+}
+
+/** Map a GET /api/orders row back into the shape the UI already expects. */
+export function mapApiOrder(row) {
+  const items = (row.items ?? []).map((it, i) => ({
+    base: { id: `b-${i}`, name: it.base ?? '—', price: 0 },
+    pizza: { id: `p-${i}`, name: it.pizza_type ?? '—', price: 0 },
+    toppings: (it.toppings ?? []).map((name, j) => ({ id: `t-${i}-${j}`, name, price: 0 })),
+    quantity: it.quantity,
+    unitPrice: 0,
+    lineSubtotal: Number(it.line_subtotal ?? 0),
+    lineDiscount: Number(it.line_discount ?? 0),
+    lineGst: Number(it.line_tax ?? 0),
+    lineTotal: Number(it.line_total ?? 0),
+  }))
+
+  const quantity = items.reduce((sum, it) => sum + it.quantity, 0)
+
+  return {
+    id: row.order_id,
+    orderCode: row.order_code,
+    customerName: row.name ?? '',
+    phone: row.phone ?? '',
+    table: row.table ?? null,
+    items,
+    itemCount: items.length,
+    quantity,
+    subtotal: Number(row.subtotal ?? 0),
+    discount: Number(row.discount ?? 0),
+    gst: Number(row.gst ?? 0),
+    total: Number(row.grand_total ?? 0),
+    paymentMode: paymentFromApi(row.payment_type),
+    timestamp: row.created_at,
+    savedAt: row.created_at,
+    status: row.status ?? 'active',
   }
 }
 
 /** Return all saved orders, most recent first. */
-export function getAllOrders() {
-  const orders = readAll()
-  // Sort by savedAt desc; fall back to insertion order if missing.
-  return [...orders].sort((a, b) => {
-    const ta = Date.parse(a?.savedAt ?? a?.timestamp ?? 0) || 0
-    const tb = Date.parse(b?.savedAt ?? b?.timestamp ?? 0) || 0
-    return tb - ta
-  })
+export async function getAllOrders() {
+  try {
+    const rows = await apiFetch('/api/orders')
+    return Array.isArray(rows) ? rows.map(mapApiOrder) : []
+  } catch (err) {
+    console.warn('[orderStore] could not fetch orders — returning empty', err)
+    return []
+  }
 }
 
 /**
  * Human-facing order code from a sequence number, e.g. 4 -> "SM-0004".
- * The internal `id` (a UUID) stays the technical key for dedup; this is the
- * short, readable number staff and customers use to track an order.
+ * Kept for tests / display helpers.
  */
 export function formatOrderCode(n) {
   const num = Number.isFinite(n) && n > 0 ? Math.floor(n) : 0
   return `SM-${String(num).padStart(4, '0')}`
 }
 
-/** Next per-outlet sequence number = highest existing orderNumber + 1. */
-function nextOrderNumber(orders) {
-  const max = orders.reduce(
-    (m, o) => (Number.isFinite(o?.orderNumber) ? Math.max(m, o.orderNumber) : m),
-    0
-  )
-  return max + 1
-}
-
 /**
- * Persist a complete order record. Returns the saved record (with a generated
- * id, a sequential orderNumber + orderCode, and savedAt). Idempotency: if an
- * order with the same `id` already exists, it is NOT written again — this blocks
- * double-logging from a double-click (and keeps its original order number).
- * @param {object} order
- * @returns {{ ok: boolean, order?: object, reason?: string }}
+ * Persist a complete order record via POST /api/orders.
+ * Returns the saved record (with server-generated id + orderCode).
  */
-export function saveOrder(order) {
+export async function saveOrder(order) {
   try {
-    const orders = readAll()
-
-    const id = order.id ?? generateId()
-    if (orders.some((o) => o.id === id)) {
-      return { ok: false, reason: 'duplicate', order: orders.find((o) => o.id === id) }
-    }
-
-    const orderNumber = Number.isFinite(order.orderNumber)
-      ? order.orderNumber
-      : nextOrderNumber(orders)
+    const created = await apiFetch('/api/orders', {
+      method: 'POST',
+      body: JSON.stringify(toCreatePayload(order)),
+    })
 
     const record = {
       ...order,
-      id,
-      orderNumber,
-      orderCode: order.orderCode ?? formatOrderCode(orderNumber),
-      status: order.status ?? 'active', // active occupies its table until completed/cancelled
-      savedAt: order.savedAt ?? new Date().toISOString(),
+      id: created.order_id,
+      orderCode: created.order_code,
+      total: Number(created.grand_total),
+      status: order.status ?? 'active',
+      savedAt: new Date().toISOString(),
+      timestamp: new Date().toISOString(),
     }
 
-    orders.push(record)
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(orders))
     return { ok: true, order: record }
   } catch (err) {
     console.error('[orderStore] failed to save order', err)
-    return { ok: false, reason: 'write-failed' }
+    return { ok: false, reason: 'write-failed', message: err.message }
   }
 }
 
 /**
- * Overwrite an existing order (admin "modify"). Matches by `id`; the caller
- * passes the full re-billed record. Preserves anything already on the record
- * that the patch doesn't mention (e.g. orderNumber/orderCode/timestamp) and
- * stamps `updatedAt`. No-op with `not-found` if the id isn't present.
- * @param {object} order - must include `id`
- * @returns {{ ok: boolean, order?: object, reason?: string }}
+ * Overwrite an existing order via PUT /api/orders/{id} (full edit). The backend
+ * recomputes totals and replaces the lines + payment. `order.id` is the public
+ * order id (uuid); the rest maps through the same body as create.
  */
-export function updateOrder(order) {
+export async function updateOrder(order) {
   try {
-    const orders = readAll()
-    const idx = orders.findIndex((o) => o.id === order?.id)
-    if (idx === -1) return { ok: false, reason: 'not-found' }
+    const updated = await apiFetch(`/api/orders/${order.id}`, {
+      method: 'PUT',
+      body: JSON.stringify(toCreatePayload(order)),
+    })
 
-    const record = { ...orders[idx], ...order, updatedAt: new Date().toISOString() }
-    orders[idx] = record
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(orders))
+    const record = {
+      ...order,
+      id: updated.order_id,
+      orderCode: updated.order_code,
+      total: Number(updated.grand_total),
+      status: order.status ?? 'active',
+      savedAt: new Date().toISOString(),
+    }
+
     return { ok: true, order: record }
   } catch (err) {
     console.error('[orderStore] failed to update order', err)
-    return { ok: false, reason: 'write-failed' }
+    return { ok: false, reason: 'write-failed', message: err.message }
   }
 }
 
-/**
- * Soft-cancel an order: keep the record (auditable) but mark it cancelled.
- * @param {string} id
- * @returns {{ ok: boolean, order?: object, reason?: string }}
- */
-export function cancelOrder(id) {
-  return updateOrder({ id, status: 'cancelled', cancelledAt: new Date().toISOString() })
+/** Soft-cancel an order via POST /api/cancel_order (frees its table). */
+export async function cancelOrder(id, reason = null) {
+  try {
+    const result = await apiFetch('/api/cancel_order', {
+      method: 'POST',
+      body: JSON.stringify({ order_id: id, reason }),
+    })
+    return {
+      ok: true,
+      order: {
+        id: result.order_id,
+        orderCode: result.order_code,
+        table: result.table ?? null,
+        status: 'cancelled',
+      },
+    }
+  } catch (err) {
+    console.error('[orderStore] failed to cancel order', err)
+    return { ok: false, reason: 'write-failed', message: err.message }
+  }
 }
 
-/**
- * Mark an order completed (admin "Complete order"). This frees its table for
- * new orders. Kept in records like everything else.
- * @param {string} id
- * @returns {{ ok: boolean, order?: object, reason?: string }}
- */
-export function completeOrder(id) {
-  return updateOrder({ id, status: 'completed', completedAt: new Date().toISOString() })
+export async function completeOrder(id) {
+  try {
+    const result = await apiFetch('/api/complete_order', {
+      method: 'POST',
+      body: JSON.stringify({ order_id: id }),
+    })
+    return {
+      ok: true,
+      order: {
+        id: result.order_id,
+        orderCode: result.order_code,
+        table: result.table ?? null,
+        status: 'completed',
+      },
+    }
+  } catch (err) {
+    console.error('[orderStore] failed to complete order', err)
+    return { ok: false, reason: 'write-failed', message: err.message }
+  }
 }
 
-/**
- * Which tables currently have an OPEN order (status active) — i.e. are occupied
- * and should be blocked from new orders until completed or cancelled. Pure read.
- * @returns {string[]} table names, de-duplicated
- */
-export function getOccupiedTables() {
-  const open = getAllOrders().filter(
+/** Which tables currently have an OPEN order. Pure read. */
+export async function getOccupiedTables() {
+  const orders = await getAllOrders()
+  const open = orders.filter(
     (o) => o?.table && o.status !== 'completed' && o.status !== 'cancelled'
   )
   return [...new Set(open.map((o) => o.table))]
 }
 
-/** Clear all orders (admin utility / demo reset). */
-export function clearOrders() {
-  try {
-    localStorage.removeItem(STORAGE_KEY)
-    return true
-  } catch {
-    return false
-  }
+/** Clear all orders — not supported when backed by Postgres. */
+export async function clearOrders() {
+  return { ok: false, reason: 'not-supported' }
 }
 
 /** Collision-resistant enough id for a single-outlet MVP. */
