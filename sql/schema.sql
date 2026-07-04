@@ -250,7 +250,10 @@ create table orders (
   notes               text,
   updated_at          timestamptz not null default now(),
 
-  unique (store_id, order_code),
+  -- order_code / order_sequence RESET daily (a shift rolls at day_cutoff), so
+  -- both must be unique PER business_date — not globally, or day 2's SM-0001
+  -- collides with day 1's. (Bug fix: this used to be unique(store_id, order_code).)
+  unique (store_id, business_date, order_code),
   unique (store_id, business_date, order_sequence)
 );
 
