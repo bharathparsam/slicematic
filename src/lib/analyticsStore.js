@@ -50,6 +50,20 @@ export async function getSalesDaily(days = 7) {
   }
 }
 
+/**
+ * Day-wise sales (orders/gross/discount/net) for a custom inclusive date range.
+ * Dates are IST business dates as 'YYYY-MM-DD'. Self-defaults to [] on error.
+ */
+export async function getSalesRange(start, end) {
+  try {
+    const data = await apiFetch(`/api/analytics/sales_range?start=${start}&end=${end}`)
+    return data.days ?? []
+  } catch (err) {
+    console.warn('[analyticsStore] could not fetch sales range', err)
+    return []
+  }
+}
+
 /** Captured revenue by tender type for the last N days. */
 export async function getPaymentMix(days = 7) {
   try {

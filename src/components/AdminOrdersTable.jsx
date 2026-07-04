@@ -188,7 +188,7 @@ function TopBar({ onExit, authed, email, onSignOut }) {
         <div style={{ lineHeight: 1.15 }}>
           <div style={{ fontFamily: FONT_DISPLAY, fontSize: 21 }}>SliceMatic</div>
           <div className="uppercase" style={{ fontSize: 10.5, letterSpacing: '0.16em', color: '#c8a883', fontWeight: 600 }}>
-            You are the boss, make changes as you wish
+            Hello Rajan!
           </div>
         </div>
       </div>

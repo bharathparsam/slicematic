@@ -3,6 +3,7 @@ import {
   getOrdersPerHour,
   getTopProducts,
   getSalesDaily,
+  getSalesRange,
   getPaymentMix,
 } from '@/lib/analyticsStore'
 import { formatCurrency } from '@/lib/billing'
@@ -55,16 +56,21 @@ export default function AdminAnalytics() {
     refresh()
   }, [])
 
-  // KPIs from the full 7-day window.
+  // KPIs from the full 7-day window. The daily series always ends on today's IST
+  // business date, so the last row is "today" and the sum is the 7-day figure.
   const net7 = daily.reduce((s, d) => s + Number(d.net_sales || 0), 0)
   const orders7 = daily.reduce((s, d) => s + Number(d.orders_count || 0), 0)
   const avgOrder = orders7 > 0 ? net7 / orders7 : 0
+  const disc7 = daily.reduce((s, d) => s + Number(d.discounts || 0), 0)
+  const discToday = Number(daily[daily.length - 1]?.discounts || 0)
   const topPizza = top[0]
 
   const kpis = [
     { label: 'Net sales · 7d', value: money0(net7), sub: 'last 7 days', icon: '₹' },
     { label: 'Orders · 7d', value: String(orders7), sub: 'last 7 days', icon: '🧾' },
     { label: 'Avg. order', value: money0(avgOrder), sub: 'per ticket', icon: '⌀' },
+    { label: 'Discount · today', value: money0(discToday), sub: 'given away today', icon: '🏷️' },
+    { label: 'Discount · 7d', value: money0(disc7), sub: 'last 7 days', icon: '🎟️' },
     {
       label: 'Top pizza',
       value: topPizza?.name ?? '—',
@@ -84,9 +90,9 @@ export default function AdminAnalytics() {
           <h1 style={{ fontFamily: FONT_DISPLAY, fontWeight: 400, fontSize: 34, margin: 0, color: C.ink }}>
             Analytics
           </h1>
-          <div className="mt-1.5" style={{ fontSize: 13.5, color: C.brown2, fontWeight: 600 }}>
-            Live from the API · Asia/Kolkata · last 7 days
-          </div>
+          {/* <div className="mt-1.5" style={{ fontSize: 13.5, color: C.brown2, fontWeight: 600 }}>
+            Understand 
+          </div> */}
         </div>
         <RefreshButton onClick={refresh} loading={loading} />
       </div>
@@ -98,7 +104,7 @@ export default function AdminAnalytics() {
       )}
 
       {/* KPI CARDS */}
-      <div className="mb-5 grid grid-cols-2 gap-4 lg:grid-cols-4">
+      <div className="mb-5 grid grid-cols-2 gap-4 md:grid-cols-3">
         {kpis.map((k) => (
           <KpiCard key={k.label} {...k} />
         ))}
@@ -125,6 +131,14 @@ export default function AdminAnalytics() {
           <PanelSub>Captured revenue · 7 days</PanelSub>
           {payments.length === 0 ? <EmptyNote /> : <PaymentDonut payments={payments} />}
         </Panel>
+      </div>
+
+      {/* CUSTOM DATE RANGE */}
+      <div className="mb-5">
+        <CustomRangePanel
+          defaultStart={daily[0]?.business_date ?? ''}
+          defaultEnd={daily[daily.length - 1]?.business_date ?? ''}
+        />
       </div>
 
       {/* TOP PIZZAS */}
@@ -246,6 +260,183 @@ function KpiCard({ label, value, sub, icon, accent }) {
       </div>
       <div className="mt-2" style={{ fontSize: 12, color: accent ? '#f2b79c' : C.brown2, fontWeight: 600 }}>
         {sub}
+      </div>
+    </div>
+  )
+}
+
+/** Friendly label for a 'YYYY-MM-DD' business date, e.g. "Sat, 5 Jul". */
+function fmtDay(iso) {
+  const d = new Date(`${iso}T00:00:00`)
+  if (Number.isNaN(d.getTime())) return iso
+  return d.toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' })
+}
+
+const RANGE_GRID = '1.4fr 0.7fr 1fr 1fr 1fr'
+
+/**
+ * Custom date-range panel: pick a From/To business date and see day-wise sales
+ * (orders, gross, discount, net) plus range totals. Queries the backend directly
+ * through the read seam (self-defaulting), so a failure just shows "no data".
+ */
+function CustomRangePanel({ defaultStart, defaultEnd }) {
+  const [start, setStart] = useState(defaultStart || '')
+  const [end, setEnd] = useState(defaultEnd || '')
+  const [rows, setRows] = useState(null) // null = not queried yet
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+
+  async function apply() {
+    if (!start || !end) return setError('Pick both a start and end date.')
+    if (start > end) return setError('Start date must be on or before the end date.')
+    setError('')
+    setLoading(true)
+    setRows(await getSalesRange(start, end))
+    setLoading(false)
+  }
+
+  const list = rows ?? []
+  const totals = list.reduce(
+    (a, d) => ({
+      orders: a.orders + Number(d.orders_count || 0),
+      gross: a.gross + Number(d.gross_sales || 0),
+      discount: a.discount + Number(d.discounts || 0),
+      net: a.net + Number(d.net_sales || 0),
+    }),
+    { orders: 0, gross: 0, discount: 0, net: 0 }
+  )
+
+  return (
+    <Panel>
+      <div className="mb-4 flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <PanelTitle>Custom date range</PanelTitle>
+          <PanelSub>Day-wise sales &amp; discounts for any period</PanelSub>
+        </div>
+        <div className="flex flex-wrap items-end gap-3">
+          <DateField label="From" value={start} max={end || undefined} onChange={setStart} />
+          <DateField label="To" value={end} min={start || undefined} onChange={setEnd} />
+          <button
+            type="button"
+            onClick={apply}
+            disabled={loading}
+            className="rounded-xl px-5 py-2.5 font-bold disabled:opacity-60"
+            style={{ background: C.red, color: C.cream, fontSize: 14, boxShadow: '0 4px 0 #e0a93f' }}
+          >
+            {loading ? 'Loading…' : 'Apply'}
+          </button>
+        </div>
+      </div>
+
+      {error && (
+        <p role="alert" className="mb-3" style={{ fontSize: 13.5, color: C.red, fontWeight: 600 }}>
+          {error}
+        </p>
+      )}
+
+      {loading ? (
+        <PizzaLoader variant="inline" />
+      ) : rows === null ? (
+        <p className="py-8 text-center" style={{ fontSize: 14, color: C.brown2 }}>
+          Pick a range and hit Apply.
+        </p>
+      ) : list.length === 0 ? (
+        <EmptyNote />
+      ) : (
+        <>
+          {/* range totals */}
+          <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
+            <RangeStat label="Orders" value={String(totals.orders)} />
+            <RangeStat label="Gross" value={money0(totals.gross)} />
+            <RangeStat label="Discount" value={money0(totals.discount)} accent />
+            <RangeStat label="Net" value={money0(totals.net)} />
+          </div>
+
+          {/* day-wise table */}
+          <div className="overflow-x-auto">
+            <div style={{ minWidth: 460 }}>
+              <div
+                className="grid gap-2 px-3 py-2 uppercase"
+                style={{
+                  gridTemplateColumns: RANGE_GRID,
+                  fontSize: 11,
+                  letterSpacing: '0.06em',
+                  color: C.brown3,
+                  fontWeight: 700,
+                }}
+              >
+                <div>Day</div>
+                <div className="text-right">Orders</div>
+                <div className="text-right">Gross</div>
+                <div className="text-right">Discount</div>
+                <div className="text-right">Net</div>
+              </div>
+              <div className="max-h-[320px] overflow-y-auto">
+                {list.map((d) => {
+                  const empty = Number(d.orders_count || 0) === 0
+                  return (
+                    <div
+                      key={d.business_date}
+                      className="grid items-center gap-2 px-3 py-2.5"
+                      style={{ gridTemplateColumns: RANGE_GRID, borderTop: `1px solid ${C.border}` }}
+                    >
+                      <div style={{ fontSize: 13, fontWeight: 700, color: empty ? C.brown3 : C.ink }}>
+                        {fmtDay(d.business_date)}
+                      </div>
+                      <div className="text-right tabular-nums" style={{ fontSize: 13, color: C.brown }}>
+                        {d.orders_count || 0}
+                      </div>
+                      <div className="text-right tabular-nums" style={{ fontSize: 13, color: C.brown }}>
+                        {empty ? '—' : formatCurrency(d.gross_sales)}
+                      </div>
+                      <div className="text-right tabular-nums" style={{ fontSize: 13, color: empty ? C.brown3 : C.red, fontWeight: 600 }}>
+                        {Number(d.discounts || 0) > 0 ? `−${formatCurrency(d.discounts)}` : '—'}
+                      </div>
+                      <div className="text-right tabular-nums" style={{ fontSize: 13, fontWeight: 700, color: empty ? C.brown3 : C.ink }}>
+                        {empty ? '—' : formatCurrency(d.net_sales)}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          </div>
+        </>
+      )}
+    </Panel>
+  )
+}
+
+function DateField({ label, value, onChange, min, max }) {
+  return (
+    <label className="flex flex-col gap-1">
+      <span className="uppercase" style={{ fontSize: 10.5, letterSpacing: '0.08em', color: C.brown3, fontWeight: 700 }}>
+        {label}
+      </span>
+      <input
+        type="date"
+        value={value}
+        min={min}
+        max={max}
+        onChange={(e) => onChange(e.target.value)}
+        className="rounded-xl px-3 py-2"
+        style={{ border: `1.5px solid ${C.border2}`, background: '#fff', color: C.ink, fontSize: 13.5, fontWeight: 600 }}
+      />
+    </label>
+  )
+}
+
+function RangeStat({ label, value, accent }) {
+  return (
+    <div
+      className="rounded-2xl px-4 py-3"
+      style={{ background: accent ? C.goldBg : C.cream, border: `1px solid ${C.border}` }}
+    >
+      <div className="uppercase" style={{ fontSize: 11, letterSpacing: '0.06em', color: C.brown3, fontWeight: 700 }}>
+        {label}
+      </div>
+      <div className="mt-1 tabular-nums" style={{ fontFamily: FONT_DISPLAY, fontSize: 22, color: accent ? C.gold : C.ink }}>
+        {value}
       </div>
     </div>
   )

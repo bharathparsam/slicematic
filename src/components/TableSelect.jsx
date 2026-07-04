@@ -203,7 +203,7 @@ export default function TableSelect({
             className="block w-full"
             style={{ aspectRatio: '1376 / 768', objectFit: 'cover' }}
           />
-          <div
+          {/* <div
             className="absolute bottom-3.5 right-3.5 flex items-center gap-2.5 rounded-xl px-3 py-2"
             style={{ background: C.cream, boxShadow: '0 8px 20px rgba(120,70,20,0.22)' }}
           >
@@ -217,7 +217,7 @@ export default function TableSelect({
               <div style={{ fontWeight: 800, fontSize: 12.5 }}>Stone-oven fresh</div>
               <div style={{ fontSize: 11, color: C.brown2 }}>baked to order</div>
             </div>
-          </div>
+          </div> */}
         </div>
 
         <h1
@@ -241,7 +241,7 @@ export default function TableSelect({
         </p>
 
         <div className="mt-5 flex gap-5">
-          <Stat value="12′" caption="to table" />
+          <Stat value="12000′" caption="pizza's served" />
           <Divider />
           <Stat value="72h" caption="proofed dough" />
           <Divider />

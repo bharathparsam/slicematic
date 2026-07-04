@@ -1,5 +1,6 @@
 import os
 import uuid
+from datetime import date
 from decimal import Decimal, ROUND_HALF_UP
 
 from db import db_cursor
@@ -895,6 +896,67 @@ def sales_daily(days: int = 7) -> dict:
             ORDER BY d.business_date
             ''',
             (days, days),
+        )
+        rows = cur.fetchall()
+
+    return {
+        'days': [
+            {
+                'business_date': r['business_date'].isoformat(),
+                'orders_count': r['orders_count'],
+                'gross_sales': r['gross_sales'],
+                'discounts': r['discounts'],
+                'net_sales': r['net_sales'],
+            }
+            for r in rows
+        ]
+    }
+
+
+def sales_range(start: str, end: str) -> dict:
+    """Net/gross sales + discounts per business day between two IST dates
+    (inclusive), zero-filled. Raises ValueError on a bad or oversized range."""
+    try:
+        start_d = date.fromisoformat(start)
+        end_d = date.fromisoformat(end)
+    except (TypeError, ValueError) as exc:
+        raise ValueError('Dates must be valid YYYY-MM-DD') from exc
+
+    if start_d > end_d:
+        raise ValueError('Start date must be on or before end date')
+    if (end_d - start_d).days > 366:
+        raise ValueError('Range must span 366 days or fewer')
+
+    with db_cursor() as (_, cur):
+        cur.execute(
+            '''
+            WITH day_series AS (
+              SELECT generate_series(%s::date, %s::date, interval '1 day')::date AS business_date
+            ),
+            sales AS (
+              SELECT
+                o.business_date,
+                count(*)::int          AS orders_count,
+                sum(o.subtotal)        AS gross_sales,
+                sum(o.discount_amount) AS discounts,
+                sum(o.grand_total)     AS net_sales
+              FROM orders o
+              JOIN order_statuses s ON s.id = o.status_id
+              WHERE s.is_cancelled = false
+                AND o.business_date BETWEEN %s::date AND %s::date
+              GROUP BY o.business_date
+            )
+            SELECT
+              d.business_date,
+              COALESCE(x.orders_count, 0) AS orders_count,
+              COALESCE(x.gross_sales, 0)  AS gross_sales,
+              COALESCE(x.discounts, 0)    AS discounts,
+              COALESCE(x.net_sales, 0)    AS net_sales
+            FROM day_series d
+            LEFT JOIN sales x ON x.business_date = d.business_date
+            ORDER BY d.business_date
+            ''',
+            (start, end, start, end),
         )
         rows = cur.fetchall()
 

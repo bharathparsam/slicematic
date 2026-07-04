@@ -38,6 +38,7 @@ from queries import (
     orders_per_hour,
     payment_mix,
     sales_daily,
+    sales_range,
     set_menu_availability,
     top_products,
     update_order,
@@ -220,6 +221,16 @@ def top_products_api(limit: int = 8):
 def sales_daily_api(days: int = 7):
     try:
         return sales_daily(max(1, min(days, 90)))
+    except OperationalError as exc:
+        raise HTTPException(status_code=503, detail=f'Database unavailable: {exc}') from exc
+
+
+@app.get('/api/analytics/sales_range', response_model=SalesDailyResponse)
+def sales_range_api(start: str, end: str):
+    try:
+        return sales_range(start, end)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except OperationalError as exc:
         raise HTTPException(status_code=503, detail=f'Database unavailable: {exc}') from exc
 
