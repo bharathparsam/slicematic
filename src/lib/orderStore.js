@@ -147,16 +147,53 @@ export async function saveOrder(order) {
 }
 
 /**
- * Overwrite an existing order — not supported by the backend yet.
+ * Overwrite an existing order via PUT /api/orders/{id} (full edit). The backend
+ * recomputes totals and replaces the lines + payment. `order.id` is the public
+ * order id (uuid); the rest maps through the same body as create.
  */
 export async function updateOrder(order) {
-  void order
-  return { ok: false, reason: 'not-supported', message: 'Order editing is not supported yet.' }
+  try {
+    const updated = await apiFetch(`/api/orders/${order.id}`, {
+      method: 'PUT',
+      body: JSON.stringify(toCreatePayload(order)),
+    })
+
+    const record = {
+      ...order,
+      id: updated.order_id,
+      orderCode: updated.order_code,
+      total: Number(updated.grand_total),
+      status: order.status ?? 'active',
+      savedAt: new Date().toISOString(),
+    }
+
+    return { ok: true, order: record }
+  } catch (err) {
+    console.error('[orderStore] failed to update order', err)
+    return { ok: false, reason: 'write-failed', message: err.message }
+  }
 }
 
-export async function cancelOrder(id) {
-  void id
-  return { ok: false, reason: 'not-supported' }
+/** Soft-cancel an order via POST /api/cancel_order (frees its table). */
+export async function cancelOrder(id, reason = null) {
+  try {
+    const result = await apiFetch('/api/cancel_order', {
+      method: 'POST',
+      body: JSON.stringify({ order_id: id, reason }),
+    })
+    return {
+      ok: true,
+      order: {
+        id: result.order_id,
+        orderCode: result.order_code,
+        table: result.table ?? null,
+        status: 'cancelled',
+      },
+    }
+  } catch (err) {
+    console.error('[orderStore] failed to cancel order', err)
+    return { ok: false, reason: 'write-failed', message: err.message }
+  }
 }
 
 export async function completeOrder(id) {

@@ -27,3 +27,36 @@ export async function getOrdersPerHour() {
     return { points: [], timezone: 'Asia/Kolkata' }
   }
 }
+
+/** Highest-sold pizzas (units + revenue). */
+export async function getTopProducts(limit = 8) {
+  try {
+    const data = await apiFetch(`/api/analytics/top_products?limit=${limit}`)
+    return data.products ?? []
+  } catch (err) {
+    console.warn('[analyticsStore] could not fetch top products', err)
+    return []
+  }
+}
+
+/** Net/gross sales per business day for the last N days. */
+export async function getSalesDaily(days = 7) {
+  try {
+    const data = await apiFetch(`/api/analytics/sales_daily?days=${days}`)
+    return data.days ?? []
+  } catch (err) {
+    console.warn('[analyticsStore] could not fetch daily sales', err)
+    return []
+  }
+}
+
+/** Captured revenue by tender type for the last N days. */
+export async function getPaymentMix(days = 7) {
+  try {
+    const data = await apiFetch(`/api/analytics/payment_mix?days=${days}`)
+    return data.methods ?? []
+  } catch (err) {
+    console.warn('[analyticsStore] could not fetch payment mix', err)
+    return []
+  }
+}

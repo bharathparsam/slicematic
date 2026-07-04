@@ -1,8 +1,12 @@
+import os
+
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from psycopg2 import OperationalError
 
 from models import (
+    CancelOrderRequest,
+    CancelOrderResponse,
     CompleteOrderRequest,
     CompleteOrderResponse,
     CreateOrderRequest,
@@ -11,18 +15,26 @@ from models import (
     NewTableResponse,
     OrderOut,
     OrdersPerHourResponse,
+    PaymentMixResponse,
+    SalesDailyResponse,
     TableOut,
+    TopProductsResponse,
 )
 from queries import (
     OrderAlreadyTerminalError,
     OrderNotFoundError,
     TableAlreadyExistsError,
+    cancel_order,
     complete_order,
     create_order,
     create_store_table,
     list_orders,
     list_store_tables,
     orders_per_hour,
+    payment_mix,
+    sales_daily,
+    top_products,
+    update_order,
 )
 
 app = FastAPI(
@@ -31,9 +43,18 @@ app = FastAPI(
     version='0.1.0',
 )
 
+# Comma-separated origins from env (add your Vercel domain in production);
+# falls back to the local Vite dev origins.
+_DEFAULT_ORIGINS = 'http://localhost:5173,http://127.0.0.1:5173'
+ALLOWED_ORIGINS = [
+    o.strip()
+    for o in os.getenv('ALLOWED_ORIGINS', _DEFAULT_ORIGINS).split(',')
+    if o.strip()
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=['http://localhost:5173', 'http://127.0.0.1:5173'],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=['*'],
     allow_headers=['*'],
@@ -86,6 +107,36 @@ def complete_order_api(payload: CompleteOrderRequest):
         ) from exc
 
 
+@app.post('/api/cancel_order', response_model=CancelOrderResponse)
+def cancel_order_api(payload: CancelOrderRequest):
+    try:
+        return cancel_order(payload.order_id, payload.reason)
+    except OrderNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except OrderAlreadyTerminalError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except OperationalError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=f'Database unavailable: {exc}',
+        ) from exc
+
+
+@app.put('/api/orders/{order_id}', response_model=CreateOrderResponse)
+def update_order_api(order_id: str, payload: CreateOrderRequest):
+    try:
+        return update_order(order_id, payload)
+    except OrderNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except OrderAlreadyTerminalError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except OperationalError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=f'Database unavailable: {exc}',
+        ) from exc
+
+
 @app.get('/api/tables', response_model=list[TableOut])
 def list_tables_api():
     try:
@@ -119,3 +170,27 @@ def orders_per_hour_api():
             status_code=503,
             detail=f'Database unavailable: {exc}',
         ) from exc
+
+
+@app.get('/api/analytics/top_products', response_model=TopProductsResponse)
+def top_products_api(limit: int = 8):
+    try:
+        return top_products(max(1, min(limit, 50)))
+    except OperationalError as exc:
+        raise HTTPException(status_code=503, detail=f'Database unavailable: {exc}') from exc
+
+
+@app.get('/api/analytics/sales_daily', response_model=SalesDailyResponse)
+def sales_daily_api(days: int = 7):
+    try:
+        return sales_daily(max(1, min(days, 90)))
+    except OperationalError as exc:
+        raise HTTPException(status_code=503, detail=f'Database unavailable: {exc}') from exc
+
+
+@app.get('/api/analytics/payment_mix', response_model=PaymentMixResponse)
+def payment_mix_api(days: int = 7):
+    try:
+        return payment_mix(max(1, min(days, 90)))
+    except OperationalError as exc:
+        raise HTTPException(status_code=503, detail=f'Database unavailable: {exc}') from exc

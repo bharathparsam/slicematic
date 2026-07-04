@@ -126,3 +126,47 @@ class HourlyOrderPoint(BaseModel):
 class OrdersPerHourResponse(BaseModel):
     points: list[HourlyOrderPoint]
     timezone: str = 'Asia/Kolkata'
+
+
+class CancelOrderRequest(BaseModel):
+    order_id: str = Field(..., min_length=36, max_length=36)
+    reason: str | None = Field(default=None, max_length=200)
+
+
+class CancelOrderResponse(BaseModel):
+    order_id: str
+    order_code: str
+    status: str
+    table: str | None = None
+
+
+class TopProduct(BaseModel):
+    name: str
+    units_sold: int
+    revenue: Decimal
+
+
+class TopProductsResponse(BaseModel):
+    products: list[TopProduct]
+
+
+class DailySalesPoint(BaseModel):
+    business_date: str
+    orders_count: int
+    gross_sales: Decimal
+    discounts: Decimal
+    net_sales: Decimal
+
+
+class SalesDailyResponse(BaseModel):
+    days: list[DailySalesPoint]
+
+
+class PaymentMixEntry(BaseModel):
+    method: str
+    payments_count: int
+    amount: Decimal
+
+
+class PaymentMixResponse(BaseModel):
+    methods: list[PaymentMixEntry]

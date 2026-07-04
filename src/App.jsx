@@ -12,7 +12,7 @@ import { loadTaxConfig, DEFAULT_TAX_CONFIG } from '@/lib/taxConfig'
 import { loadTables, DEFAULT_TABLES } from '@/lib/tablesLoader'
 import { validateName, validatePhone } from '@/lib/validators'
 import { computeOrderBill } from '@/lib/billing'
-import { saveOrder, getOccupiedTables } from '@/lib/orderStore'
+import { saveOrder, updateOrder, getOccupiedTables } from '@/lib/orderStore'
 import { createTable, listTables, mergeTableLabels } from '@/lib/tableStore'
 
 export default function App() {
@@ -136,6 +136,25 @@ function seedCartFromOrder(order) {
   }))
 }
 
+/**
+ * When MODIFYING a saved order, the API returns item component prices as 0 (the
+ * DB snapshots line totals, not per-part prices). Re-resolve each part from the
+ * loaded menu BY NAME to recover real ids + prices — otherwise the recomputed
+ * bill and per-line Edit would break. Falls back to the raw part if unmatched.
+ */
+function resolveCartFromOrder(order, menu) {
+  const byName = (list, name) => list.find((x) => x.name === name)
+  return (order?.items ?? []).map((it, i) => ({
+    lineId: `L${i + 1}`,
+    base: byName(menu.bases, it.base?.name) ?? { id: `b-${i}`, name: it.base?.name ?? '—', price: 0 },
+    pizza: byName(menu.pizzas, it.pizza?.name) ?? { id: `p-${i}`, name: it.pizza?.name ?? '—', price: 0 },
+    toppings: (it.toppings ?? []).map(
+      (t, j) => byName(menu.toppings, t.name) ?? { id: `t-${i}-${j}`, name: t.name, price: 0 }
+    ),
+    quantity: it.quantity,
+  }))
+}
+
 function OrderFlow({ editingOrder = null, onDoneEditing }) {
   const isEditing = !!editingOrder
 
@@ -164,6 +183,8 @@ function OrderFlow({ editingOrder = null, onDoneEditing }) {
       setTaxConfig(cfg)
       setTableLabel(tbl.label)
       setTables(await loadTablesFromApi(tbl))
+      // Editing: recover real menu prices/ids by name so the bill recomputes right.
+      if (isEditing) setCart(resolveCartFromOrder(editingOrder, data))
     } catch (err) {
       setMenu(null)
       setLoadError(err.message || 'Failed to load menu.')
@@ -340,10 +361,6 @@ function OrderFlow({ editingOrder = null, onDoneEditing }) {
   }
 
   function handlePlaceOrder() {
-    if (isEditing) {
-      setPaymentError('Order editing is not supported with the server yet.')
-      return
-    }
     setPlaceOrderError('')
     if (!validateOrderForm()) return
     setPlaceOrderOpen(true)
@@ -391,18 +408,20 @@ function OrderFlow({ editingOrder = null, onDoneEditing }) {
       paymentMode: payment,
     }
 
-    const result = await saveOrder({
-      timestamp: new Date().toISOString(),
-      sessionStartedAt: sessionStartedAt.current,
-      ...payload,
-    })
+    const result = isEditing
+      ? await updateOrder({ id: editingOrder.id, status: editingOrder.status, ...payload })
+      : await saveOrder({
+          timestamp: new Date().toISOString(),
+          sessionStartedAt: sessionStartedAt.current,
+          ...payload,
+        })
 
     setSubmitting(false)
     submittingRef.current = false
 
     if (result.ok) {
       setPlaceOrderOpen(false)
-      setConfirmedMode('created')
+      setConfirmedMode(isEditing ? 'updated' : 'created')
       setConfirmed(result.order)
       refreshOccupancy()
     } else {

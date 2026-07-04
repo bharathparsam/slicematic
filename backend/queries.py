@@ -238,43 +238,158 @@ def complete_order(order_public_id: str) -> dict:
             (row['id'], from_status_id, completed_status_id),
         )
 
-        if session_id:
-            cur.execute(
-                '''
-                SELECT COUNT(*) AS open_orders
-                FROM orders o
-                JOIN order_statuses s ON s.id = o.status_id
-                WHERE o.session_id = %s
-                  AND s.is_open = true
-                  AND o.id <> %s
-                ''',
-                (session_id, row['id']),
-            )
-            open_orders = cur.fetchone()['open_orders']
-
-            if open_orders == 0:
-                cur.execute(
-                    '''
-                    UPDATE table_sessions
-                    SET status = 'closed', closed_at = now()
-                    WHERE id = %s AND status = 'open'
-                    ''',
-                    (session_id,),
-                )
-                cur.execute(
-                    '''
-                    UPDATE store_tables
-                    SET current_session_id = NULL
-                    WHERE current_session_id = %s
-                    ''',
-                    (session_id,),
-                )
+        release_table_if_session_empty(cur, session_id, row['id'])
 
     return {
         'order_id': row['order_id'],
         'order_code': row['order_code'],
         'status': 'completed',
         'table': row['table'],
+    }
+
+
+def cancel_order(order_public_id: str, reason: str | None = None) -> dict:
+    with db_cursor() as (_, cur):
+        cur.execute(
+            '''
+            SELECT
+              o.id,
+              o.public_id::text AS order_id,
+              o.order_code,
+              o.session_id,
+              o.notes AS table,
+              o.status_id,
+              s.code AS status_code,
+              s.is_cancelled
+            FROM orders o
+            JOIN order_statuses s ON s.id = o.status_id
+            WHERE o.public_id = %s
+            ''',
+            (order_public_id,),
+        )
+        row = cur.fetchone()
+        if not row:
+            raise OrderNotFoundError(f'Order {order_public_id} not found')
+        if row['status_code'] == 'completed' or row['is_cancelled']:
+            raise OrderAlreadyTerminalError('Order is already completed or cancelled')
+
+        cancelled_status_id = get_status_id(cur, 'cancelled')
+        cur.execute(
+            'UPDATE orders SET status_id = %s, cancelled_at = now(), cancel_reason = %s '
+            'WHERE id = %s',
+            (cancelled_status_id, reason, row['id']),
+        )
+        cur.execute(
+            '''
+            INSERT INTO order_status_events (order_id, from_status_id, to_status_id, reason)
+            VALUES (%s, %s, %s, %s)
+            ''',
+            (row['id'], row['status_id'], cancelled_status_id, reason),
+        )
+        # A cancelled order frees its table (unless another open order shares the session).
+        release_table_if_session_empty(cur, row['session_id'], row['id'])
+
+    return {
+        'order_id': row['order_id'],
+        'order_code': row['order_code'],
+        'status': 'cancelled',
+        'table': row['table'],
+    }
+
+
+def update_order(order_public_id: str, payload) -> dict:
+    """Full edit of an existing (non-terminal) order: recompute + replace lines."""
+    totals = _compute_totals(payload.items)
+
+    with db_cursor() as (_, cur):
+        cur.execute(
+            '''
+            SELECT
+              o.id,
+              o.order_code,
+              o.store_id,
+              o.session_id,
+              o.notes AS table,
+              s.code AS status_code,
+              s.is_cancelled
+            FROM orders o
+            JOIN order_statuses s ON s.id = o.status_id
+            WHERE o.public_id = %s
+            ''',
+            (order_public_id,),
+        )
+        row = cur.fetchone()
+        if not row:
+            raise OrderNotFoundError(f'Order {order_public_id} not found')
+        if row['status_code'] == 'completed' or row['is_cancelled']:
+            raise OrderAlreadyTerminalError('Cannot modify a completed or cancelled order')
+
+        order_id = row['id']
+        store_id = row['store_id']
+        user_id = upsert_user(cur, payload.phone, payload.name)
+
+        # Table change: move to the new table's session and free the old one.
+        old_table = row['table']
+        old_session_id = row['session_id']
+        new_table = payload.table or None
+        session_id = old_session_id
+        if new_table != (old_table or None):
+            session_id = ensure_table_session(cur, store_id, new_table, user_id)
+            if old_session_id and old_session_id != session_id:
+                release_table_if_session_empty(cur, old_session_id, order_id)
+
+        cur.execute(
+            '''
+            UPDATE orders SET
+              session_id = %s,
+              user_id = %s,
+              customer_name = %s,
+              customer_phone = %s,
+              subtotal = %s,
+              discount_amount = %s,
+              taxable_amount = %s,
+              cgst_amount = %s,
+              sgst_amount = %s,
+              tax_amount = %s,
+              grand_total = %s,
+              notes = %s,
+              updated_at = now()
+            WHERE id = %s
+            ''',
+            (
+                session_id,
+                user_id,
+                payload.name,
+                payload.phone,
+                totals['subtotal'],
+                totals['discount_total'],
+                totals['taxable_amount'],
+                totals['half_gst'],
+                totals['half_gst'],
+                totals['tax_total'],
+                totals['grand_total'],
+                new_table,
+                order_id,
+            ),
+        )
+
+        # Replace lines (cascade drops selections) and the payment row.
+        cur.execute('DELETE FROM order_items WHERE order_id = %s', (order_id,))
+        _insert_order_lines(cur, store_id, order_id, payload.items)
+
+        cur.execute('DELETE FROM payments WHERE order_id = %s', (order_id,))
+        cur.execute(
+            '''
+            INSERT INTO payments (order_id, method, status, amount)
+            VALUES (%s, %s::payment_method, 'captured', %s)
+            ''',
+            (order_id, payload.payment_type, totals['grand_total']),
+        )
+
+    return {
+        'order_id': order_public_id,
+        'order_code': row['order_code'],
+        'grand_total': totals['grand_total'],
     }
 
 
@@ -312,6 +427,99 @@ def get_or_create_menu_unit(cur, store_id: int, name: str, item_type: str, price
         (store_id, item_type, sku, name, round2(price)),
     )
     return cur.fetchone()['id']
+
+
+def _compute_totals(items) -> dict:
+    """Aggregate line math the same way the frontend billing does."""
+    subtotal = Decimal('0')
+    discount_total = Decimal('0')
+    tax_total = Decimal('0')
+    for item in items:
+        line_taxable = round2(item.price_wo_gst * item.quantity)
+        line_discount = round2(item.line_discount)
+        subtotal += round2(line_taxable + line_discount)
+        discount_total += line_discount
+        tax_total += round2(item.gst)
+    taxable_amount = round2(subtotal - discount_total)
+    return {
+        'subtotal': round2(subtotal),
+        'discount_total': round2(discount_total),
+        'tax_total': round2(tax_total),
+        'taxable_amount': taxable_amount,
+        'grand_total': round2(taxable_amount + tax_total),
+        'half_gst': round2(tax_total / Decimal('2')),
+    }
+
+
+def _insert_order_lines(cur, store_id: int, order_id: int, items) -> None:
+    """Insert order_items + their base/pizza/topping selections."""
+    for line_no, item in enumerate(items, start=1):
+        line_taxable = round2(item.price_wo_gst * item.quantity)
+        line_discount = round2(item.line_discount)
+        line_subtotal = round2(line_taxable + line_discount)
+        line_tax = round2(item.gst)
+        line_total = round2(line_taxable + line_tax)
+        unit_price = round2(item.price_wo_gst)
+
+        cur.execute(
+            '''
+            INSERT INTO order_items (
+              order_id, line_no, quantity, unit_price,
+              line_subtotal, line_discount, line_tax, line_total
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            RETURNING id
+            ''',
+            (order_id, line_no, item.quantity, unit_price,
+             line_subtotal, line_discount, line_tax, line_total),
+        )
+        order_item_id = cur.fetchone()['id']
+
+        selections = [
+            ('base', item.base, Decimal('0')),
+            ('pizza', item.pizza_type, unit_price),
+        ]
+        for topping in item.toppings:
+            selections.append(('topping', topping, Decimal('0')))
+
+        for role, name, snap_price in selections:
+            menu_unit_id = get_or_create_menu_unit(cur, store_id, name, role, snap_price)
+            cur.execute(
+                '''
+                INSERT INTO order_item_selections (
+                  order_item_id, menu_unit_id, role, item_name, unit_price, quantity
+                )
+                VALUES (%s, %s, %s::menu_item_type, %s, %s, 1)
+                ''',
+                (order_item_id, menu_unit_id, role, name, round2(snap_price)),
+            )
+
+
+def release_table_if_session_empty(cur, session_id, exclude_order_id=None) -> None:
+    """Close the session + free its table once no OPEN orders remain on it."""
+    if not session_id:
+        return
+    cur.execute(
+        '''
+        SELECT COUNT(*) AS open_orders
+        FROM orders o
+        JOIN order_statuses s ON s.id = o.status_id
+        WHERE o.session_id = %s
+          AND s.is_open = true
+          AND o.id <> COALESCE(%s, -1)
+        ''',
+        (session_id, exclude_order_id),
+    )
+    if cur.fetchone()['open_orders'] == 0:
+        cur.execute(
+            "UPDATE table_sessions SET status = 'closed', closed_at = now() "
+            "WHERE id = %s AND status = 'open'",
+            (session_id,),
+        )
+        cur.execute(
+            'UPDATE store_tables SET current_session_id = NULL WHERE current_session_id = %s',
+            (session_id,),
+        )
 
 
 def create_order(payload) -> dict:
@@ -394,56 +602,7 @@ def create_order(payload) -> dict:
         )
         order_id = cur.fetchone()['id']
 
-        for line_no, item in enumerate(payload.items, start=1):
-            line_taxable = round2(item.price_wo_gst * item.quantity)
-            line_discount = round2(item.line_discount)
-            line_subtotal = round2(line_taxable + line_discount)
-            line_tax = round2(item.gst)
-            line_total = round2(line_taxable + line_tax)
-            unit_price = round2(item.price_wo_gst)
-
-            cur.execute(
-                '''
-                INSERT INTO order_items (
-                  order_id, line_no, quantity, unit_price,
-                  line_subtotal, line_discount, line_tax, line_total
-                )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                RETURNING id
-                ''',
-                (
-                    order_id,
-                    line_no,
-                    item.quantity,
-                    unit_price,
-                    line_subtotal,
-                    line_discount,
-                    line_tax,
-                    line_total,
-                ),
-            )
-            order_item_id = cur.fetchone()['id']
-
-            selections = [
-                ('base', item.base, Decimal('0')),
-                ('pizza', item.pizza_type, unit_price),
-            ]
-            for topping in item.toppings:
-                selections.append(('topping', topping, Decimal('0')))
-
-            for role, name, snap_price in selections:
-                menu_unit_id = get_or_create_menu_unit(
-                    cur, store_id, name, role, snap_price
-                )
-                cur.execute(
-                    '''
-                    INSERT INTO order_item_selections (
-                      order_item_id, menu_unit_id, role, item_name, unit_price, quantity
-                    )
-                    VALUES (%s, %s, %s::menu_item_type, %s, %s, 1)
-                    ''',
-                    (order_item_id, menu_unit_id, role, name, round2(snap_price)),
-                )
+        _insert_order_lines(cur, store_id, order_id, payload.items)
 
         cur.execute(
             '''
@@ -614,3 +773,116 @@ def orders_per_hour() -> dict:
         for row in rows
     ]
     return {'points': points, 'timezone': 'Asia/Kolkata'}
+
+
+def top_products(limit: int = 8) -> dict:
+    """Highest-sold pizzas (units + pre-tax revenue), non-cancelled orders."""
+    with db_cursor() as (_, cur):
+        cur.execute(
+            '''
+            SELECT
+              sel.item_name AS name,
+              SUM(sel.quantity * oi.quantity)::int AS units_sold,
+              SUM(sel.unit_price * sel.quantity * oi.quantity) AS revenue
+            FROM order_item_selections sel
+            JOIN order_items oi ON oi.id = sel.order_item_id
+            JOIN orders o ON o.id = oi.order_id
+            JOIN order_statuses s ON s.id = o.status_id
+            WHERE sel.role = 'pizza' AND s.is_cancelled = false
+            GROUP BY sel.item_name
+            ORDER BY units_sold DESC, revenue DESC
+            LIMIT %s
+            ''',
+            (limit,),
+        )
+        rows = cur.fetchall()
+
+    return {
+        'products': [
+            {'name': r['name'], 'units_sold': r['units_sold'], 'revenue': r['revenue']}
+            for r in rows
+        ]
+    }
+
+
+def sales_daily(days: int = 7) -> dict:
+    """Net/gross sales per business day for the last N days (zero-filled)."""
+    with db_cursor() as (_, cur):
+        cur.execute(
+            '''
+            WITH day_series AS (
+              SELECT generate_series(
+                (now() AT TIME ZONE 'Asia/Kolkata')::date - ((%s - 1) * interval '1 day'),
+                (now() AT TIME ZONE 'Asia/Kolkata')::date,
+                interval '1 day'
+              )::date AS business_date
+            ),
+            sales AS (
+              SELECT
+                o.business_date,
+                count(*)::int      AS orders_count,
+                sum(o.subtotal)    AS gross_sales,
+                sum(o.discount_amount) AS discounts,
+                sum(o.grand_total) AS net_sales
+              FROM orders o
+              JOIN order_statuses s ON s.id = o.status_id
+              WHERE s.is_cancelled = false
+                AND o.business_date >= (now() AT TIME ZONE 'Asia/Kolkata')::date - ((%s - 1) * interval '1 day')
+              GROUP BY o.business_date
+            )
+            SELECT
+              d.business_date,
+              COALESCE(x.orders_count, 0) AS orders_count,
+              COALESCE(x.gross_sales, 0)  AS gross_sales,
+              COALESCE(x.discounts, 0)    AS discounts,
+              COALESCE(x.net_sales, 0)    AS net_sales
+            FROM day_series d
+            LEFT JOIN sales x ON x.business_date = d.business_date
+            ORDER BY d.business_date
+            ''',
+            (days, days),
+        )
+        rows = cur.fetchall()
+
+    return {
+        'days': [
+            {
+                'business_date': r['business_date'].isoformat(),
+                'orders_count': r['orders_count'],
+                'gross_sales': r['gross_sales'],
+                'discounts': r['discounts'],
+                'net_sales': r['net_sales'],
+            }
+            for r in rows
+        ]
+    }
+
+
+def payment_mix(days: int = 7) -> dict:
+    """Captured revenue by tender type for the last N days."""
+    with db_cursor() as (_, cur):
+        cur.execute(
+            '''
+            SELECT
+              p.method::text  AS method,
+              count(*)::int   AS payments_count,
+              sum(p.amount)   AS amount
+            FROM payments p
+            JOIN orders o ON o.id = p.order_id
+            JOIN order_statuses s ON s.id = o.status_id
+            WHERE p.status = 'captured'
+              AND s.is_cancelled = false
+              AND o.business_date >= (now() AT TIME ZONE 'Asia/Kolkata')::date - ((%s - 1) * interval '1 day')
+            GROUP BY p.method
+            ORDER BY amount DESC
+            ''',
+            (days,),
+        )
+        rows = cur.fetchall()
+
+    return {
+        'methods': [
+            {'method': r['method'], 'payments_count': r['payments_count'], 'amount': r['amount']}
+            for r in rows
+        ]
+    }

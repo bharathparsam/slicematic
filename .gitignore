@@ -12,3 +12,6 @@ backend/**/__pycache__
 
 # Per-developer Claude Code settings (local overrides, not shared)
 .claude/settings.local.json
+
+# Never commit real env files (templates like .env.example are fine)
+.env

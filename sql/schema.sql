@@ -487,3 +487,34 @@ $$ language plpgsql;
 -- full read/write to authenticated staff via a policy keyed on staff.auth_user_id.
 -- Dashboards read the mv_* views through a role that only has SELECT on them.
 -- (Policies intentionally omitted here — add once auth roles are defined.)
+
+-- ===========================================================================
+-- ROW LEVEL SECURITY
+-- ---------------------------------------------------------------------------
+-- The FastAPI backend connects as the table OWNER (postgres) and BYPASSES RLS,
+-- so the app is unaffected. Enabling RLS with NO policies denies the auto-
+-- exposed PostgREST roles (anon / authenticated) — sealing the public API door.
+-- Add policies later only if the browser talks to Supabase directly.
+-- ===========================================================================
+alter table stores                  enable row level security;
+alter table staff                   enable row level security;
+alter table users                   enable row level security;
+alter table store_tables            enable row level security;
+alter table table_sessions          enable row level security;
+alter table menu_categories         enable row level security;
+alter table menu_units              enable row level security;
+alter table menu_unit_availability  enable row level security;
+alter table tax_profiles            enable row level security;
+alter table promotions              enable row level security;
+alter table order_statuses          enable row level security;
+alter table orders                  enable row level security;
+alter table order_items             enable row level security;
+alter table order_item_selections   enable row level security;
+alter table payments                enable row level security;
+alter table order_status_events     enable row level security;
+alter table order_feedback          enable row level security;
+
+-- Views aren't covered by RLS — revoke them from the public API roles too.
+revoke all on mv_order_item_facts, mv_daily_sales, mv_product_sales,
+              mv_payment_mix, mv_table_turnover
+  from anon, authenticated;
