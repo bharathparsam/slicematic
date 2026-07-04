@@ -4,9 +4,9 @@
   "serviceType": "standalone_restaurant",
   "gst": {
     "label": "GST",
-    "rate": 0.14,
-    "cgst": 0.07,
-    "sgst": 0.07,
+    "rate": 0.18,
+    "cgst": 0.09,
+    "sgst": 0.09,
     "inputTaxCredit": false
   },
   "discount": {
