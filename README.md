@@ -36,7 +36,9 @@ npm run api:setup  # create backend venv + install Python deps (first time)
 npm run api        # start FastAPI on http://localhost:8000
 ```
 
-Admin tab uses a placeholder password: **`slice123`** (client-side gate only, not real auth).
+Admin portal is protected by **Supabase Auth** (email + password). Create admin
+users in Supabase → Authentication → Users, and set `VITE_SUPABASE_URL` +
+`VITE_SUPABASE_ANON_KEY` in `.env.local` (see `.env.example`).
 
 ## Database setup
 

@@ -4,9 +4,8 @@ import AdminAnalytics from '@/components/AdminAnalytics'
 import AdminChat from '@/components/AdminChat'
 import { getAllOrders, completeOrder, cancelOrder } from '@/lib/orderStore'
 import { formatCurrency } from '@/lib/billing'
+import { signIn, signOut, isSupabaseConfigured } from '@/lib/auth'
 import { C, FONT_DISPLAY, FONT_MONO } from '@/components/order/theme'
-
-const PLACEHOLDER_PASSWORD = 'slice123'
 
 const FILTERS = [
   { key: 'all', label: 'All' },
@@ -18,9 +17,7 @@ const FILTERS = [
 // Orders table column template (kept in sync between the header + body rows).
 const GRID = '96px 100px 72px 1.3fr 1.8fr 48px 108px 66px 168px'
 
-export default function AdminOrdersTable({ onModify, onExit, unlocked, onUnlock }) {
-  const [pw, setPw] = useState('')
-  const [pwError, setPwError] = useState('')
+export default function AdminOrdersTable({ onModify, onExit, session, authReady }) {
   const [orders, setOrders] = useState([])
   const [loading, setLoading] = useState(false)
   const [loadError, setLoadError] = useState('')
@@ -31,22 +28,14 @@ export default function AdminOrdersTable({ onModify, onExit, unlocked, onUnlock 
   const [section, setSection] = useState('orders')
   const [filter, setFilter] = useState('all')
 
-  // Unlock state is owned by App so it survives the Modify round-trip (this
-  // component unmounts while the order is edited in the Order view).
+  // Authenticated when there's a Supabase session (owned by App so it survives the
+  // Modify round-trip, which unmounts this component while editing an order).
+  const unlocked = !!session
+
   useEffect(() => {
     if (unlocked) refresh()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [unlocked])
-
-  function tryUnlock(e) {
-    e.preventDefault()
-    if (pw === PLACEHOLDER_PASSWORD) {
-      onUnlock()
-      setPwError('')
-    } else {
-      setPwError('Incorrect password.')
-    }
-  }
 
   async function refresh() {
     setLoading(true)
@@ -133,10 +122,10 @@ export default function AdminOrdersTable({ onModify, onExit, unlocked, onUnlock 
           onConfirm={confirmCancel}
         />
 
-        <TopBar onExit={onExit} />
+        <TopBar onExit={onExit} authed={unlocked} email={session?.user?.email} onSignOut={signOut} />
 
         {!unlocked ? (
-          <GateCard pw={pw} setPw={setPw} pwError={pwError} onSubmit={tryUnlock} />
+          !authReady ? <AuthChecking /> : <LoginCard />
         ) : (
           <div className="flex min-h-0 flex-1 flex-col md:min-h-[calc(100vh-73px)] md:flex-row">
             <Sidebar
@@ -178,10 +167,10 @@ export default function AdminOrdersTable({ onModify, onExit, unlocked, onUnlock 
 
 /* -------------------------------- shell --------------------------------- */
 
-function TopBar({ onExit }) {
+function TopBar({ onExit, authed, email, onSignOut }) {
   return (
     <header
-      className="sticky top-0 z-30 flex items-center justify-between px-6 py-4 sm:px-8"
+      className="sticky top-0 z-30 flex items-center justify-between gap-3 px-6 py-4 sm:px-8"
       style={{ background: C.ink, color: C.cream }}
     >
       <div className="flex items-center gap-3">
@@ -198,7 +187,7 @@ function TopBar({ onExit }) {
           </div>
         </div>
       </div>
-      <div className="flex items-center gap-4">
+      <div className="flex items-center gap-3 sm:gap-4">
         <div className="hidden items-center gap-2 sm:flex" style={{ fontSize: 13, color: '#d9c6a6', fontWeight: 600 }}>
           <span
             className="h-2 w-2 rounded-full"
@@ -222,6 +211,27 @@ function TopBar({ onExit }) {
             Admin
           </span>
         </div>
+        {authed && (
+          <div className="flex items-center gap-2.5">
+            {email && (
+              <span
+                className="hidden max-w-[180px] truncate lg:inline"
+                title={email}
+                style={{ fontSize: 12.5, color: '#c8a883', fontWeight: 600 }}
+              >
+                {email}
+              </span>
+            )}
+            <button
+              type="button"
+              onClick={onSignOut}
+              className="rounded-full px-3.5 py-2 font-semibold transition-colors hover:opacity-80"
+              style={{ fontSize: 13, background: '#3a2418', color: '#e8caae' }}
+            >
+              Sign out
+            </button>
+          </div>
+        )}
       </div>
     </header>
   )
@@ -295,49 +305,126 @@ function Sidebar({ section, setSection, activeCount, todaySales, todayOrders, to
   )
 }
 
-function GateCard({ pw, setPw, pwError, onSubmit }) {
+/** Brief placeholder while the persisted Supabase session is being restored. */
+function AuthChecking() {
+  return (
+    <div className="flex flex-1 items-center justify-center p-6">
+      <p style={{ fontSize: 14, color: C.brown2, fontWeight: 600 }}>Checking session…</p>
+    </div>
+  )
+}
+
+/** Supabase email + password sign-in for the admin portal. */
+function LoginCard() {
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [error, setError] = useState('')
+  const [busy, setBusy] = useState(false)
+  const configured = isSupabaseConfigured
+
+  async function onSubmit(e) {
+    e.preventDefault()
+    if (busy) return
+    setBusy(true)
+    setError('')
+    const result = await signIn(email, password)
+    // On success, App's auth listener flips the session and this unmounts; on
+    // failure we stay put and surface the reason.
+    if (!result.ok) {
+      setError(result.message || 'Sign-in failed.')
+      setBusy(false)
+    }
+  }
+
+  const inputStyle = (bad) => ({
+    border: `1.5px solid ${bad ? C.red : C.border2}`,
+    background: '#fff',
+    fontSize: 15,
+    color: C.ink,
+  })
+
   return (
     <div className="flex flex-1 items-center justify-center p-6">
       <div
         className="w-full max-w-sm rounded-[20px] p-7"
         style={{ background: '#fff', border: `1px solid ${C.border}`, boxShadow: `0 4px 0 ${C.border}` }}
       >
+        <div
+          className="mb-4 flex h-12 w-12 items-center justify-center rounded-xl"
+          style={{ background: C.red, boxShadow: '0 6px 16px rgba(197,52,28,0.28)' }}
+        >
+          <span style={{ fontFamily: FONT_DISPLAY, color: C.cream, fontSize: 24, lineHeight: 1 }}>S</span>
+        </div>
         <h2 style={{ fontFamily: FONT_DISPLAY, fontWeight: 400, fontSize: 24, margin: 0, color: C.ink }}>
-          Admin access
+          Admin sign-in
         </h2>
         <p className="mt-1.5" style={{ fontSize: 13.5, color: C.brown2 }}>
-          Placeholder gate — real auth comes with Supabase (Stage 3). Password:{' '}
-          <code className="rounded px-1" style={{ background: C.goldBg, color: C.gold }}>
-            slice123
-          </code>
+          Staff access only. Sign in with your SliceMatic admin email.
         </p>
-        <form onSubmit={onSubmit} className="mt-4 space-y-3">
-          <label htmlFor="admin-pw" className="block" style={{ fontSize: 13, fontWeight: 700, color: C.gold }}>
-            Password
-          </label>
-          <input
-            id="admin-pw"
-            type="password"
-            value={pw}
-            onChange={(e) => setPw(e.target.value)}
-            aria-invalid={!!pwError}
-            aria-describedby={pwError ? 'admin-pw-error' : undefined}
-            className="w-full rounded-xl px-3 py-3"
-            style={{ border: `1.5px solid ${pwError ? C.red : C.border2}`, background: '#fff', fontSize: 15, color: C.ink }}
-          />
-          {pwError && (
-            <p id="admin-pw-error" role="alert" style={{ fontSize: 13, color: C.red, fontWeight: 600 }}>
-              {pwError}
-            </p>
-          )}
-          <button
-            type="submit"
-            className="w-full rounded-xl py-3 font-bold"
-            style={{ background: C.red, color: C.cream, fontSize: 15, boxShadow: '0 10px 22px rgba(197,52,28,0.3)' }}
+
+        {!configured ? (
+          <p
+            role="alert"
+            className="mt-4 rounded-xl px-4 py-3"
+            style={{ background: '#f7e2dd', color: C.red, fontSize: 13, fontWeight: 600 }}
           >
-            Unlock
-          </button>
-        </form>
+            Supabase isn’t configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in
+            your .env.local, then restart the dev server.
+          </p>
+        ) : (
+          <form onSubmit={onSubmit} className="mt-4 space-y-3">
+            <div>
+              <label htmlFor="admin-email" className="block" style={{ fontSize: 13, fontWeight: 700, color: C.gold }}>
+                Email
+              </label>
+              <input
+                id="admin-email"
+                type="email"
+                autoComplete="username"
+                value={email}
+                onChange={(e) => {
+                  setEmail(e.target.value)
+                  setError('')
+                }}
+                aria-invalid={!!error}
+                className="mt-1.5 w-full rounded-xl px-3 py-3"
+                style={inputStyle(false)}
+              />
+            </div>
+            <div>
+              <label htmlFor="admin-pw" className="block" style={{ fontSize: 13, fontWeight: 700, color: C.gold }}>
+                Password
+              </label>
+              <input
+                id="admin-pw"
+                type="password"
+                autoComplete="current-password"
+                value={password}
+                onChange={(e) => {
+                  setPassword(e.target.value)
+                  setError('')
+                }}
+                aria-invalid={!!error}
+                aria-describedby={error ? 'admin-auth-error' : undefined}
+                className="mt-1.5 w-full rounded-xl px-3 py-3"
+                style={inputStyle(!!error)}
+              />
+            </div>
+            {error && (
+              <p id="admin-auth-error" role="alert" style={{ fontSize: 13, color: C.red, fontWeight: 600 }}>
+                {error}
+              </p>
+            )}
+            <button
+              type="submit"
+              disabled={busy || !email || !password}
+              className="w-full rounded-xl py-3 font-bold disabled:opacity-60"
+              style={{ background: C.red, color: C.cream, fontSize: 15, boxShadow: '0 10px 22px rgba(197,52,28,0.3)' }}
+            >
+              {busy ? 'Signing in…' : 'Sign in'}
+            </button>
+          </form>
+        )}
       </div>
     </div>
   )

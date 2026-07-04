@@ -12,6 +12,7 @@
     "api": "cd backend && .venv/bin/python -m uvicorn main:app --reload --port 8000"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.109.0",
     "clsx": "^2.1.1",
     "framer-motion": "^12.42.2",
     "react": "^18.3.1",

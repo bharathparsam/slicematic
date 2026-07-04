@@ -283,7 +283,7 @@ export default function TableSelect({
 
       {/* HOW IT WORKS */}
       <motion.section className="px-5 pb-7 pt-1.5" {...enter(1)}>
-        <Eyebrow>How it works</Eyebrow>
+        {/* <Eyebrow>How it works</Eyebrow> */}
         <SectionTitle>Three taps to a hot pizza</SectionTitle>
         <div className="flex flex-col gap-3">
           {STEPS.map((s) => (
@@ -317,7 +317,7 @@ export default function TableSelect({
       {/* FEATURED MENU (real pizzas from the loaded menu) */}
       {featured.length > 0 && (
         <motion.section className="px-5 pb-7 pt-1.5" {...enter(2)}>
-          <Eyebrow>On the wall today</Eyebrow>
+          {/* <Eyebrow>On the wall today</Eyebrow> */}
           <SectionTitle className="mb-4">Crowd favourites</SectionTitle>
           <div className="flex flex-col gap-3.5">
             {featured.map((p, i) => {
@@ -385,7 +385,7 @@ export default function TableSelect({
       >
         <div className="mb-1.5 flex items-end justify-between">
           <div>
-            <Eyebrow>Ready when you are</Eyebrow>
+            {/* <Eyebrow>Ready when you are</Eyebrow> */}
             <SectionTitle>Select your table</SectionTitle>
           </div>
           <div

@@ -12,14 +12,31 @@ import { validateName, validatePhone } from '@/lib/validators'
 import { computeOrderBill } from '@/lib/billing'
 import { saveOrder, updateOrder, getOccupiedTables } from '@/lib/orderStore'
 import { createTable, listTables, mergeTableLabels } from '@/lib/tableStore'
+import { getSession, onAuthChange } from '@/lib/auth'
 
 export default function App() {
   const [view, setView] = useState('order') // 'order' | 'admin'
   // A saved order pulled in from Admin for full editing (null = new order).
   const [editingOrder, setEditingOrder] = useState(null)
-  // Admin unlock lives here so it survives the Modify round-trip (Admin unmounts
-  // while an order is edited in the Order view).
-  const [adminUnlocked, setAdminUnlocked] = useState(false)
+  // Admin auth session (Supabase). Owned here so a signed-in admin survives the
+  // Modify round-trip (Admin unmounts while an order is edited in the Order view).
+  // authReady guards the initial async session restore so we don't flash the login.
+  const [session, setSession] = useState(null)
+  const [authReady, setAuthReady] = useState(false)
+
+  useEffect(() => {
+    let active = true
+    getSession().then((s) => {
+      if (!active) return
+      setSession(s)
+      setAuthReady(true)
+    })
+    const unsubscribe = onAuthChange((s) => setSession(s))
+    return () => {
+      active = false
+      unsubscribe()
+    }
+  }, [])
 
   function goToView(next) {
     setEditingOrder(null) // switching tabs abandons any in-progress modify
@@ -48,8 +65,8 @@ export default function App() {
         <AdminOrdersTable
           onModify={startModify}
           onExit={() => goToView('order')}
-          unlocked={adminUnlocked}
-          onUnlock={() => setAdminUnlocked(true)}
+          session={session}
+          authReady={authReady}
         />
       )}
     </div>
@@ -343,7 +360,7 @@ function OrderFlow({ editingOrder = null, onDoneEditing, onAdmin }) {
 
   // --- Render ---------------------------------------------------------
   if (loading) {
-    return <StatusPanel title="Loading menu…" tone="muted" />
+    return <StatusPanel title="Good things take time…" tone="muted" />
   }
   if (loadError) {
     return (

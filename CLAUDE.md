@@ -47,8 +47,13 @@ locally. Set `VITE_API_URL` to point the frontend at another host (e.g. in Verce
 The DB must exist and `sql/schema.sql` must be applied first — see `README.md` for
 the full Postgres setup.
 
-Admin tab placeholder password: `slice123` (client-side gate only — real auth is a
-later Supabase stage).
+Admin portal is gated by **Supabase Auth** (email + password). Admin users are
+created in Supabase → Authentication → Users; sign-in goes through `src/lib/auth.js`
+(the auth seam) using `VITE_SUPABASE_URL` + `VITE_SUPABASE_ANON_KEY` (see
+`.env.example`). The session persists in `localStorage` and survives the Modify
+round-trip. NOTE: this gates the **UI**; the FastAPI endpoints are still
+unauthenticated — verifying the Supabase JWT on the backend is the follow-up for
+true end-to-end protection.
 
 ## Architecture — the important rules
 
