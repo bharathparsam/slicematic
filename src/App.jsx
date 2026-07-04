@@ -22,9 +22,13 @@ export default function App() {
   // Admin unlock lives here so it survives the Modify round-trip (Admin unmounts
   // while an order is edited in the Order view).
   const [adminUnlocked, setAdminUnlocked] = useState(false)
+  // The order-flow landing (table select) is a full-bleed branded screen with its
+  // own top bar, so OrderFlow asks us to hide the generic app chrome while it's up.
+  const [showChrome, setShowChrome] = useState(true)
 
   function goToView(next) {
     setEditingOrder(null) // switching tabs abandons any in-progress modify
+    setShowChrome(true)
     setView(next)
   }
   function startModify(order) {
@@ -38,10 +42,15 @@ export default function App() {
 
   return (
     <div className="min-h-screen">
-      <Header view={view} setView={goToView} />
+      {showChrome && <Header view={view} setView={goToView} />}
       <main
         className={
-          'mx-auto w-full px-4 py-6 ' + (view === 'admin' ? 'max-w-none' : 'max-w-3xl')
+          'mx-auto w-full ' +
+          (view === 'admin'
+            ? 'max-w-none px-4 py-6'
+            : showChrome
+              ? 'max-w-3xl px-4 py-6'
+              : 'px-3 py-4')
         }
       >
         {view === 'order' ? (
@@ -49,6 +58,8 @@ export default function App() {
             key={editingOrder ? editingOrder.id : 'new'}
             editingOrder={editingOrder}
             onDoneEditing={doneEditing}
+            onChrome={setShowChrome}
+            onAdmin={() => goToView('admin')}
           />
         ) : (
           <AdminOrdersTable
@@ -58,14 +69,16 @@ export default function App() {
           />
         )}
       </main>
-      <footer
-        className={
-          'mx-auto px-4 pb-8 pt-2 text-center text-xs text-muted-foreground ' +
-          (view === 'admin' ? 'max-w-none' : 'max-w-3xl')
-        }
-      >
-        SliceMatic MVP · orders via API · Delhi
-      </footer>
+      {showChrome && (
+        <footer
+          className={
+            'mx-auto px-4 pb-8 pt-2 text-center text-xs text-muted-foreground ' +
+            (view === 'admin' ? 'max-w-none' : 'max-w-3xl')
+          }
+        >
+          SliceMatic MVP · orders via API · Delhi
+        </footer>
+      )}
     </div>
   )
 }
@@ -155,7 +168,7 @@ function resolveCartFromOrder(order, menu) {
   }))
 }
 
-function OrderFlow({ editingOrder = null, onDoneEditing }) {
+function OrderFlow({ editingOrder = null, onDoneEditing, onChrome, onAdmin }) {
   const isEditing = !!editingOrder
 
   // --- Load state (menu required; tax + tables self-default) ----------
@@ -228,6 +241,13 @@ function OrderFlow({ editingOrder = null, onDoneEditing }) {
   useEffect(() => {
     refreshOccupancy()
   }, [])
+
+  // The table stage of a NEW order is the branded full-bleed landing — ask App to
+  // hide its generic header/footer while it's showing (editing skips this stage).
+  useEffect(() => {
+    onChrome?.(!(stage === 'table' && !isEditing))
+  }, [stage, isEditing, onChrome])
+  useEffect(() => () => onChrome?.(true), [onChrome])
 
   // Re-show the table screen (new order / change table), always with fresh occupancy.
   function goToTableStage() {
@@ -500,9 +520,11 @@ function OrderFlow({ editingOrder = null, onDoneEditing }) {
             label={tableLabel}
             selected={table}
             occupied={occupiedTables}
+            menu={menu}
             onSelect={setTable}
             onStart={() => setStage('order')}
             onAddTable={handleAddTable}
+            onAdmin={onAdmin}
           />
         </motion.div>
       </AnimatePresence>
