@@ -7,6 +7,8 @@ from psycopg2 import OperationalError
 from models import (
     CancelOrderRequest,
     CancelOrderResponse,
+    ChatRequest,
+    ChatResponse,
     CompleteOrderRequest,
     CompleteOrderResponse,
     CreateOrderRequest,
@@ -36,6 +38,8 @@ from queries import (
     top_products,
     update_order,
 )
+from chat_service import answer_analytics_question
+from openrouter_client import OpenRouterError
 
 app = FastAPI(
     title='SliceMatic API',
@@ -194,3 +198,24 @@ def payment_mix_api(days: int = 7):
         return payment_mix(max(1, min(days, 90)))
     except OperationalError as exc:
         raise HTTPException(status_code=503, detail=f'Database unavailable: {exc}') from exc
+
+
+@app.post('/api/analytics/chat', response_model=ChatResponse)
+def analytics_chat_api(payload: ChatRequest):
+    try:
+        result = answer_analytics_question(
+            payload.message,
+            [t.model_dump() for t in payload.history],
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except OpenRouterError as exc:
+        code = exc.status_code or 502
+        raise HTTPException(status_code=code, detail=str(exc)) from exc
+    except OperationalError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=f'Database unavailable: {exc}',
+        ) from exc
+
+    return ChatResponse(**result)

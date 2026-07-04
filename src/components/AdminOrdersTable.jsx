@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { motion, AnimatePresence, useReducedMotion } from 'framer-motion'
 import AdminAnalytics from '@/components/AdminAnalytics'
+import AdminChat from '@/components/AdminChat'
 import { getAllOrders, completeOrder, cancelOrder } from '@/lib/orderStore'
 import { formatCurrency } from '@/lib/billing'
 import { C, FONT_DISPLAY, FONT_MONO } from '@/components/order/theme'
@@ -137,7 +138,7 @@ export default function AdminOrdersTable({ onModify, onExit, unlocked, onUnlock 
         {!unlocked ? (
           <GateCard pw={pw} setPw={setPw} pwError={pwError} onSubmit={tryUnlock} />
         ) : (
-          <div className="flex min-h-0 flex-1 flex-col md:flex-row">
+          <div className="flex min-h-0 flex-1 flex-col md:min-h-[calc(100vh-73px)] md:flex-row">
             <Sidebar
               section={section}
               setSection={setSection}
@@ -149,6 +150,8 @@ export default function AdminOrdersTable({ onModify, onExit, unlocked, onUnlock 
 
             {section === 'analytics' ? (
               <AdminAnalytics />
+            ) : section === 'chat' ? (
+              <AdminChat />
             ) : (
               <OrdersPanel
                 orders={filtered}
@@ -228,6 +231,7 @@ function Sidebar({ section, setSection, activeCount, todaySales, todayOrders, to
   const items = [
     { key: 'orders', icon: '📋', label: 'Orders', badge: activeCount || '' },
     { key: 'analytics', icon: '📊', label: 'Analytics', badge: '' },
+    { key: 'chat', icon: '🤖', label: 'Ask COO', badge: '' },
   ]
   return (
     <aside

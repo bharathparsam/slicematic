@@ -170,3 +170,19 @@ class PaymentMixEntry(BaseModel):
 
 class PaymentMixResponse(BaseModel):
     methods: list[PaymentMixEntry]
+
+
+class ChatTurn(BaseModel):
+    role: Literal['user', 'assistant']
+    content: str = Field(..., min_length=1, max_length=4000)
+
+
+class ChatRequest(BaseModel):
+    message: str = Field(..., min_length=1, max_length=500)
+    history: list[ChatTurn] = Field(default_factory=list)
+
+
+class ChatResponse(BaseModel):
+    reply: str
+    model: str
+    context_as_of: str

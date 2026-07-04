@@ -232,6 +232,33 @@ VITE_API_URL=http://localhost:8000 npm run dev
 | `GET` | `/health` | Health check |
 | `POST` | `/api/orders` | Create an order (returns UUID `order_id`) |
 | `GET` | `/api/orders` | List all orders, newest first |
+| `POST` | `/api/complete_order` | Mark an order completed |
+| `POST` | `/api/cancel_order` | Cancel an active order |
+| `PUT` | `/api/orders/{order_id}` | Update an order (modify flow) |
+| `GET` | `/api/tables` | List store tables |
+| `POST` | `/api/new_table` | Add a table |
+| `GET` | `/api/analytics/orders_per_hour` | Hourly order counts (7 days) |
+| `GET` | `/api/analytics/top_products` | Best-selling pizzas |
+| `GET` | `/api/analytics/sales_daily` | Daily net/gross sales |
+| `GET` | `/api/analytics/payment_mix` | Payment mix (last N days) |
+| `POST` | `/api/analytics/chat` | COO chatbot — natural-language analytics Q&A |
+
+### COO chatbot (OpenRouter)
+
+Admin → **Ask COO** sends questions to `POST /api/analytics/chat`. The backend
+loads live analytics from Postgres, embeds them in a prompt, and calls
+[OpenRouter](https://openrouter.ai) (default model: `google/gemini-2.5-flash`).
+
+Add to `backend/.env` (see `backend/.env.example`):
+
+```
+OPENROUTER_API_KEY=sk-or-v1-...
+OPENROUTER_MODEL=google/gemini-2.5-flash
+```
+
+Get a key at [openrouter.ai/keys](https://openrouter.ai/keys). The key stays
+**server-side only** — never put it in Vite env vars. Restart `npm run api`
+after changing `.env`.
 
 ### Troubleshooting
 
@@ -240,6 +267,8 @@ VITE_API_URL=http://localhost:8000 npm run dev
   see [Database troubleshooting](#database-troubleshooting).
 - **`Database unavailable` on submit** — Postgres is not running, the database
   does not exist, or `DATABASE_URL` in `backend/.env` is wrong.
+- **Chat says "set OPENROUTER_API_KEY"** — add your OpenRouter key to
+  `backend/.env` and restart the API.
 
 ## Menu data
 
