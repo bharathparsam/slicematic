@@ -16,3 +16,12 @@
     @apply outline-none ring-2 ring-ring ring-offset-2 ring-offset-background;
   }
 }
+
+/* Hide the scrollbar inside the redesigned bottom sheets (content still scrolls). */
+.noscroll::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+.noscroll {
+  scrollbar-width: none;
+}

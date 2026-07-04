@@ -1,12 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { motion, AnimatePresence, useReducedMotion } from 'framer-motion'
+import { motion, AnimatePresence } from 'framer-motion'
 import TableSelect from '@/components/TableSelect'
-import CustomerIntakeForm from '@/components/CustomerIntakeForm'
-import MenuSelector from '@/components/MenuSelector'
-import OrderSummary, { BillBreakdown } from '@/components/OrderSummary'
-import PaymentSelector from '@/components/PaymentSelector'
+import OrderScreen from '@/components/order/OrderScreen'
+import DoneScreen from '@/components/order/DoneScreen'
 import AdminOrdersTable from '@/components/AdminOrdersTable'
-import { Card, CardContent, CardHeader, CardTitle, CardDescription, Button } from '@/components/ui/primitives'
+import { Button } from '@/components/ui/primitives'
 import { loadAllMenus } from '@/lib/menuLoader'
 import { loadTaxConfig, DEFAULT_TAX_CONFIG } from '@/lib/taxConfig'
 import { loadTables, DEFAULT_TABLES } from '@/lib/tablesLoader'
@@ -242,12 +240,13 @@ function OrderFlow({ editingOrder = null, onDoneEditing, onChrome, onAdmin }) {
     refreshOccupancy()
   }, [])
 
-  // The table stage of a NEW order is the branded full-bleed landing — ask App to
-  // hide its generic header/footer while it's showing (editing skips this stage).
+  // The whole customer order flow (table landing + order screen) is branded and
+  // full-bleed with its own top bar, so hide App's generic chrome for the duration
+  // and restore it when we leave for Admin.
   useEffect(() => {
-    onChrome?.(!(stage === 'table' && !isEditing))
-  }, [stage, isEditing, onChrome])
-  useEffect(() => () => onChrome?.(true), [onChrome])
+    onChrome?.(false)
+    return () => onChrome?.(true)
+  }, [onChrome])
 
   // Re-show the table screen (new order / change table), always with fresh occupancy.
   function goToTableStage() {
@@ -268,20 +267,14 @@ function OrderFlow({ editingOrder = null, onDoneEditing, onChrome, onAdmin }) {
   const [cartError, setCartError] = useState('')
   const lineCounter = useRef(editingOrder?.items?.length ?? 0)
 
-  // --- Edit-in-place: a cart line pulled back into the builder ---------
-  const [editingLineId, setEditingLineId] = useState('')
-  const [editSeed, setEditSeed] = useState(null) // { nonce, pizzaId, baseId, toppingIds, quantity }
-  const editNonce = useRef(0)
-
   // --- Payment / submit -----------------------------------------------
-  const [payment, setPayment] = useState(editingOrder?.paymentMode ?? '')
+  const [payment, setPayment] = useState(editingOrder?.paymentMode ?? 'Cash')
   const [paymentError, setPaymentError] = useState('')
   const [confirmed, setConfirmed] = useState(null)
   const [confirmedMode, setConfirmedMode] = useState('created') // 'created' | 'updated'
   const submittingRef = useRef(false) // synchronous guard vs double-click
   const [submitting, setSubmitting] = useState(false)
-  const [placeOrderOpen, setPlaceOrderOpen] = useState(false)
-  const [placeOrderError, setPlaceOrderError] = useState('')
+  const [submitError, setSubmitError] = useState('')
 
   // Aggregate bill for everything in the cart.
   const orderBill = useMemo(() => computeOrderBill(cart, taxConfig), [cart, taxConfig])
@@ -302,31 +295,20 @@ function OrderFlow({ editingOrder = null, onDoneEditing, onChrome, onAdmin }) {
   }
 
   // --- Cart handlers --------------------------------------------------
-  // A completed combo arrives from the pizza builder: { base, pizza, toppings, quantity }.
-  // When editing a line, replace it in place (keeping its lineId). Otherwise, if
-  // the exact same base+pizza+toppings is already in the cart, bump that line's
-  // quantity (capped at 10) instead of adding a duplicate; else append a new line.
+  // A completed combo arrives from the customize sheet: { base, pizza, toppings,
+  // quantity }. If the exact same base+pizza+toppings is already in the cart, bump
+  // that line's quantity (capped at 10) instead of adding a duplicate; else append.
   function onAddCombo(combo) {
-    if (editingLineId) {
-      setCart((c) =>
-        c.map((line) => (line.lineId === editingLineId ? { lineId: line.lineId, ...combo } : line))
-      )
-      setEditingLineId('')
-      setEditSeed(null)
-    } else {
-      const lineId = `L${++lineCounter.current}`
-      setCart((c) => {
-        const idx = c.findIndex((line) => sameCombination(line, combo))
-        if (idx !== -1) {
-          return c.map((line, i) =>
-            i === idx
-              ? { ...line, quantity: Math.min(10, line.quantity + combo.quantity) }
-              : line
-          )
-        }
-        return [...c, { lineId, ...combo }]
-      })
-    }
+    const lineId = `L${++lineCounter.current}`
+    setCart((c) => {
+      const idx = c.findIndex((line) => sameCombination(line, combo))
+      if (idx !== -1) {
+        return c.map((line, i) =>
+          i === idx ? { ...line, quantity: Math.min(10, line.quantity + combo.quantity) } : line
+        )
+      }
+      return [...c, { lineId, ...combo }]
+    })
     setCartError('')
   }
   function updateLineQty(lineId, nextQty) {
@@ -335,26 +317,6 @@ function OrderFlow({ editingOrder = null, onDoneEditing, onChrome, onAdmin }) {
   }
   function removeLine(lineId) {
     setCart((c) => c.filter((line) => line.lineId !== lineId))
-    if (lineId === editingLineId) cancelEdit() // dropping the line we were editing
-  }
-
-  // Pull a cart line back into the builder: open its pizza pre-filled + scroll.
-  function editLine(lineId) {
-    const line = cart.find((l) => l.lineId === lineId)
-    if (!line) return
-    setEditingLineId(lineId)
-    setEditSeed({
-      nonce: ++editNonce.current,
-      pizzaId: line.pizza.id,
-      baseId: line.base.id,
-      toppingIds: line.toppings.map((t) => t.id),
-      quantity: line.quantity,
-    })
-    setCartError('')
-  }
-  function cancelEdit() {
-    setEditingLineId('')
-    setEditSeed(null)
   }
 
   // --- Place order (review popup) then confirm (API) -------------------
@@ -380,24 +342,12 @@ function OrderFlow({ editingOrder = null, onDoneEditing, onChrome, onAdmin }) {
     return true
   }
 
-  function handlePlaceOrder() {
-    setPlaceOrderError('')
-    if (!validateOrderForm()) return
-    setPlaceOrderOpen(true)
-  }
-
-  function closePlaceOrderModal() {
-    if (submittingRef.current) return
-    setPlaceOrderOpen(false)
-    setPlaceOrderError('')
-  }
-
   async function handleConfirmOrder() {
     if (submittingRef.current) return
 
     submittingRef.current = true
     setSubmitting(true)
-    setPlaceOrderError('')
+    setSubmitError('')
 
     const finalBill = computeOrderBill(cart, taxConfig)
 
@@ -440,12 +390,11 @@ function OrderFlow({ editingOrder = null, onDoneEditing, onChrome, onAdmin }) {
     submittingRef.current = false
 
     if (result.ok) {
-      setPlaceOrderOpen(false)
       setConfirmedMode(isEditing ? 'updated' : 'created')
       setConfirmed(result.order)
       refreshOccupancy()
     } else {
-      setPlaceOrderError(result.message || 'Could not save the order. Please try again.')
+      setSubmitError(result.message || 'Could not save the order. Please try again.')
     }
   }
 
@@ -455,23 +404,15 @@ function OrderFlow({ editingOrder = null, onDoneEditing, onChrome, onAdmin }) {
     sessionStartedAt.current = new Date().toISOString()
   }
 
-  function closeReceipt() {
-    resetAfterOrder()
-    goToTableStage()
-  }
-
   function resetAfterOrder() {
     setCustomer({ name: '', phone: '' })
     setCustErrors({ name: '', phone: '' })
     setTouched({ name: false, phone: false })
     setCart([])
     setCartError('')
-    setEditingLineId('')
-    setEditSeed(null)
-    setPayment('')
+    setPayment('Cash')
     setPaymentError('')
-    setPlaceOrderOpen(false)
-    setPlaceOrderError('')
+    setSubmitError('')
     setConfirmed(null)
   }
 
@@ -493,12 +434,11 @@ function OrderFlow({ editingOrder = null, onDoneEditing, onChrome, onAdmin }) {
   }
   if (confirmed) {
     return (
-      <OrderReceiptModal
+      <DoneScreen
         order={confirmed}
-        taxConfig={taxConfig}
+        label={tableLabel}
         mode={confirmedMode}
         onNew={startNewOrder}
-        onClose={closeReceipt}
         onBackToAdmin={onDoneEditing}
       />
     )
@@ -531,224 +471,36 @@ function OrderFlow({ editingOrder = null, onDoneEditing, onChrome, onAdmin }) {
     )
   }
 
-  // Order-building flow (mobile-first single column).
+  // Order-building flow — redesigned grid + bottom-sheet screen.
   return (
-    <>
-      <PlaceOrderModal
-        open={placeOrderOpen}
-        bill={orderBill}
-        taxConfig={taxConfig}
-        table={table}
-        customerName={customer.name.trim()}
-        paymentMode={payment}
-        busy={submitting}
-        error={placeOrderError}
-        onCancel={closePlaceOrderModal}
-        onConfirm={handleConfirmOrder}
-      />
-      <motion.div
-      key="order"
-      initial={{ opacity: 0, x: 24 }}
-      animate={{ opacity: 1, x: 0 }}
-      transition={{ duration: 0.25, ease: [0.4, 0, 0.2, 1] }}
-      className="mx-auto max-w-md space-y-5"
-    >
-      {/* Edit banner — only when modifying an existing order from Admin */}
-      {isEditing && (
-        <div className="flex items-center justify-between rounded-lg border border-brand/40 bg-brand/10 px-4 py-3">
-          <p className="text-sm">
-            <span className="text-muted-foreground">Modifying </span>
-            <span className="font-mono font-bold text-brand-dark">{editingOrder.orderCode}</span>
-          </p>
-          <button
-            type="button"
-            onClick={onDoneEditing}
-            className="rounded px-2 py-1 text-xs font-semibold text-destructive hover:bg-destructive/10"
-          >
-            Discard
-          </button>
-        </div>
-      )}
-
-      {/* Table banner + change */}
-      <div className="flex items-center justify-between rounded-lg bg-brand/5 px-4 py-3">
-        <p className="text-sm">
-          <span className="text-muted-foreground">Ordering for </span>
-          <span className="font-bold text-brand-dark">{table}</span>
-        </p>
-        <button
-          type="button"
-          onClick={goToTableStage}
-          className="rounded px-2 py-1 text-xs font-semibold text-brand-dark hover:bg-brand/10"
-        >
-          Change
-        </button>
-      </div>
-
-      <CustomerIntakeForm
-        values={customer}
-        errors={custErrors}
-        onChange={onCustChange}
-        onBlur={onCustBlur}
-      />
-
-      {/* Cart kept high up so its per-line Edit is reachable without scrolling
-          past the whole menu (also carries the empty-cart confirm error). */}
-      <OrderSummary
-        order={orderBill}
-        taxConfig={taxConfig}
-        onUpdateQty={updateLineQty}
-        onRemove={removeLine}
-        onEdit={editLine}
-        editingLineId={editingLineId}
-        error={cartError}
-      />
-
-      <MenuSelector
-        menu={menu}
-        taxConfig={taxConfig}
-        onAddCombo={onAddCombo}
-        editSeed={editSeed}
-        editingPizzaId={editSeed?.pizzaId ?? ''}
-        onCancelEdit={cancelEdit}
-      />
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Payment</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <PaymentSelector
-            value={payment}
-            error={paymentError}
-            onChange={(m) => {
-              setPayment(m)
-              setPaymentError('')
-            }}
-          />
-
-          <Button
-            className="w-full py-3.5 text-base"
-            onClick={handlePlaceOrder}
-            disabled={submitting}
-          >
-            Place Order
-          </Button>
-        </CardContent>
-      </Card>
-    </motion.div>
-    </>
-  )
-}
-
-function PlaceOrderModal({
-  open,
-  bill,
-  taxConfig,
-  table,
-  customerName,
-  paymentMode,
-  busy,
-  error,
-  onCancel,
-  onConfirm,
-}) {
-  const reduceMotion = useReducedMotion()
-  const confirmRef = useRef(null)
-
-  useEffect(() => {
-    if (!open) return
-
-    const onKey = (e) => {
-      if (e.key === 'Escape' && !busy) onCancel()
-    }
-    document.addEventListener('keydown', onKey)
-    document.body.style.overflow = 'hidden'
-    confirmRef.current?.focus()
-
-    return () => {
-      document.removeEventListener('keydown', onKey)
-      document.body.style.overflow = ''
-    }
-  }, [open, busy, onCancel])
-
-  const spring = reduceMotion
-    ? { duration: 0 }
-    : { type: 'spring', stiffness: 420, damping: 32 }
-
-  return (
-    <AnimatePresence>
-      {open && (
-        <motion.div
-          className="fixed inset-0 z-50 flex items-end justify-center p-4 sm:items-center"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          transition={{ duration: reduceMotion ? 0 : 0.2 }}
-        >
-          <motion.button
-            type="button"
-            aria-label="Close dialog"
-            className="absolute inset-0 bg-foreground/40 backdrop-blur-sm"
-            onClick={busy ? undefined : onCancel}
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-          />
-
-          <motion.div
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="place-order-title"
-            className="relative z-10 w-full max-w-md overflow-hidden rounded-xl border border-border bg-background shadow-2xl"
-            initial={reduceMotion ? false : { opacity: 0, y: 24, scale: 0.97 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={reduceMotion ? { opacity: 0 } : { opacity: 0, y: 16, scale: 0.98 }}
-            transition={spring}
-          >
-            <div className="border-b border-border bg-gradient-to-br from-brand/10 to-background px-6 pb-5 pt-6">
-              <h2 id="place-order-title" className="text-xl font-bold tracking-tight">
-                Review your order
-              </h2>
-              <p className="mt-1.5 text-sm text-muted-foreground">
-                {table ? `${table} · ` : ''}
-                {customerName}
-                {paymentMode ? ` · ${paymentMode}` : ''}
-              </p>
-            </div>
-
-            <div className="px-6 py-5">
-              <BillBreakdown bill={bill} taxConfig={taxConfig} variant="compact" />
-              {error && (
-                <p role="alert" className="mt-4 text-sm font-medium text-destructive">
-                  {error}
-                </p>
-              )}
-            </div>
-
-            <div className="flex flex-col-reverse gap-2 border-t border-border bg-muted/40 px-6 py-4 sm:flex-row sm:justify-end">
-              <Button
-                variant="outline"
-                className="sm:min-w-[7rem]"
-                onClick={onCancel}
-                disabled={busy}
-              >
-                Cancel
-              </Button>
-              <button
-                ref={confirmRef}
-                type="button"
-                onClick={onConfirm}
-                disabled={busy}
-                className="inline-flex items-center justify-center rounded-md bg-brand px-4 py-2.5 text-sm font-semibold text-brand-foreground transition-colors hover:bg-brand-dark disabled:opacity-50 sm:min-w-[9rem]"
-              >
-                {busy ? 'Saving…' : 'Confirm Order'}
-              </button>
-            </div>
-          </motion.div>
-        </motion.div>
-      )}
-    </AnimatePresence>
+    <OrderScreen
+      menu={menu}
+      taxConfig={taxConfig}
+      table={table}
+      label={tableLabel}
+      isEditing={isEditing}
+      editingOrder={editingOrder}
+      bill={orderBill}
+      customer={customer}
+      custErrors={custErrors}
+      payment={payment}
+      submitting={submitting}
+      submitError={submitError}
+      onAdd={onAddCombo}
+      onQty={updateLineQty}
+      onRemove={removeLine}
+      onCustChange={onCustChange}
+      onCustBlur={onCustBlur}
+      onPayment={(m) => {
+        setPayment(m)
+        setPaymentError('')
+      }}
+      validate={validateOrderForm}
+      onConfirm={handleConfirmOrder}
+      onChangeTable={goToTableStage}
+      onAdmin={onAdmin}
+      onDiscardEdit={onDoneEditing}
+    />
   )
 }
 
@@ -768,102 +520,3 @@ function StatusPanel({ title, tone = 'muted', children }) {
   )
 }
 
-function OrderReceiptModal({ order, taxConfig, mode = 'created', onNew, onClose, onBackToAdmin }) {
-  const reduceMotion = useReducedMotion()
-  const doneRef = useRef(null)
-  const updated = mode === 'updated'
-
-  const bill = useMemo(
-    () => ({
-      subtotal: order.subtotal ?? 0,
-      discount: order.discount ?? 0,
-      discountApplied: (order.discount ?? 0) > 0,
-      cgst: order.cgst ?? 0,
-      sgst: order.sgst ?? 0,
-      total: order.total ?? 0,
-      totalQuantity: order.quantity ?? 0,
-    }),
-    [order]
-  )
-
-  useEffect(() => {
-    document.body.style.overflow = 'hidden'
-    doneRef.current?.focus()
-    return () => {
-      document.body.style.overflow = ''
-    }
-  }, [])
-
-  const spring = reduceMotion
-    ? { duration: 0 }
-    : { type: 'spring', stiffness: 420, damping: 32 }
-
-  return (
-    <AnimatePresence>
-      <motion.div
-        className="fixed inset-0 z-50 flex items-end justify-center p-4 sm:items-center"
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        transition={{ duration: reduceMotion ? 0 : 0.2 }}
-      >
-        <div className="absolute inset-0 bg-foreground/40 backdrop-blur-sm" aria-hidden="true" />
-
-        <motion.div
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="receipt-title"
-          className="relative z-10 w-full max-w-md overflow-hidden rounded-xl border border-border bg-background shadow-2xl"
-          initial={reduceMotion ? false : { opacity: 0, y: 28, scale: 0.97 }}
-          animate={{ opacity: 1, y: 0, scale: 1 }}
-          transition={spring}
-        >
-          <div className="border-b border-border bg-gradient-to-br from-brand/10 to-background px-6 pb-5 pt-6 text-center">
-            <motion.div
-              className="mx-auto mb-3 text-5xl"
-              aria-hidden="true"
-              initial={{ scale: 0 }}
-              animate={{ scale: 1 }}
-              transition={{ type: 'spring', stiffness: 260, damping: 18, delay: 0.05 }}
-            >
-              ✅
-            </motion.div>
-            <h2 id="receipt-title" className="text-xl font-bold tracking-tight">
-              {updated ? 'Order updated' : 'Order confirmed'}
-            </h2>
-            <p className="mt-1 text-sm text-muted-foreground">
-              {order.table ? `${order.table} · ` : ''}
-              {order.customerName} · {order.paymentMode}
-            </p>
-            {order.orderCode && (
-              <p className="mt-3 font-mono text-lg font-bold tracking-wide text-brand-dark">
-                {order.orderCode}
-              </p>
-            )}
-          </div>
-
-          <div className="px-6 py-5">
-            <p className="mb-3 text-sm font-semibold">Tax invoice</p>
-            <BillBreakdown bill={bill} taxConfig={taxConfig} />
-          </div>
-
-          <div className="flex flex-col-reverse gap-2 border-t border-border bg-muted/40 px-6 py-4 sm:flex-row sm:justify-end">
-            {!updated && (
-              <Button variant="outline" className="sm:min-w-[7rem]" onClick={onClose}>
-                Close
-              </Button>
-            )}
-            <button
-              ref={doneRef}
-              type="button"
-              onClick={updated ? onBackToAdmin : onNew}
-              className="inline-flex items-center justify-center rounded-md bg-brand px-4 py-3 text-sm font-semibold text-brand-foreground transition-colors hover:bg-brand-dark sm:min-w-[9rem]"
-            >
-              {updated ? 'Back to orders' : 'New order'}
-            </button>
-          </div>
-        </motion.div>
-      </motion.div>
-    </AnimatePresence>
-  )
-}
