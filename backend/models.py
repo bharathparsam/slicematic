@@ -57,6 +57,7 @@ class OrderSelectionOut(BaseModel):
 
 
 class OrderItemOut(BaseModel):
+    id: int | None = None
     line_no: int
     quantity: int
     line_subtotal: Decimal
@@ -66,6 +67,8 @@ class OrderItemOut(BaseModel):
     pizza_type: str | None = None
     base: str | None = None
     toppings: list[str] = Field(default_factory=list)
+    status_code: str | None = None
+    assigned_staff: str | None = None
     selections: list[OrderSelectionOut] = Field(default_factory=list)
 
 
@@ -172,17 +175,160 @@ class PaymentMixResponse(BaseModel):
     methods: list[PaymentMixEntry]
 
 
-class ChatTurn(BaseModel):
-    role: Literal['user', 'assistant']
-    content: str = Field(..., min_length=1, max_length=4000)
+class MenuAvailabilityItem(BaseModel):
+    item_id: str
+    item_name: str | None = None
+    is_sold_out: bool = False
 
 
-class ChatRequest(BaseModel):
+class MenuAvailabilityResponse(BaseModel):
+    items: list[MenuAvailabilityItem] = Field(default_factory=list)
+
+
+class SetAvailabilityRequest(BaseModel):
+    item_id: str = Field(..., min_length=1, max_length=120)
+    is_sold_out: bool
+    item_type: str = Field(default='pizza', max_length=20)
+    item_name: str | None = Field(default=None, max_length=120)
+
+
+StaffRole = Literal['staff', 'manager', 'admin']
+
+
+class StaffOut(BaseModel):
+    id: int
+    full_name: str
+    role: str
+    has_pin: bool = False
+
+
+class StaffAdminOut(StaffOut):
+    is_active: bool = True
+
+
+class VerifyStaffRequest(BaseModel):
+    staff_id: int = Field(..., ge=1)
+    pin: str = Field(..., min_length=4, max_length=4)
+
+    @field_validator('pin')
+    @classmethod
+    def validate_pin(cls, value: str) -> str:
+        if not value.isdigit():
+            raise ValueError('PIN must be exactly 4 digits')
+        return value
+
+
+class CreateStaffRequest(BaseModel):
+    full_name: str = Field(..., min_length=2, max_length=40)
+    role: StaffRole = 'staff'
+    pin: str | None = Field(default=None, min_length=4, max_length=4)
+
+    @field_validator('full_name')
+    @classmethod
+    def validate_full_name(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not all(ch.isalpha() or ch.isspace() for ch in cleaned):
+            raise ValueError('Name may only contain letters and spaces')
+        return cleaned
+
+    @field_validator('pin')
+    @classmethod
+    def validate_pin(cls, value: str | None) -> str | None:
+        if value is None or value == '':
+            return None
+        if not value.isdigit():
+            raise ValueError('PIN must be exactly 4 digits')
+        return value
+
+
+class UpdateStaffRequest(BaseModel):
+    full_name: str | None = Field(default=None, min_length=2, max_length=40)
+    role: StaffRole | None = None
+    pin: str | None = Field(default=None, min_length=4, max_length=4)
+    is_active: bool | None = None
+
+    @field_validator('full_name')
+    @classmethod
+    def validate_full_name(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        cleaned = value.strip()
+        if not all(ch.isalpha() or ch.isspace() for ch in cleaned):
+            raise ValueError('Name may only contain letters and spaces')
+        return cleaned
+
+    @field_validator('pin')
+    @classmethod
+    def validate_pin(cls, value: str | None) -> str | None:
+        if value is None or value == '':
+            return None
+        if not value.isdigit():
+            raise ValueError('PIN must be exactly 4 digits')
+        return value
+
+
+class KitchenQueueItem(BaseModel):
+    item_id: int
+    line_no: int
+    quantity: int
+    status_code: str
+    status_name: str
+    order_code: str
+    order_id: str
+    table_label: str | None = None
+    pizza_name: str | None = None
+    base_name: str | None = None
+    toppings: list[str] = Field(default_factory=list)
+    assigned_staff_id: int | None = None
+    assigned_staff: str | None = None
+    queued_at: str | None = None
+    elapsed_seconds: int | None = None
+
+
+class AssignItemRequest(BaseModel):
+    staff_id: int
+
+
+class TransitionItemRequest(BaseModel):
+    to_status: Literal['assigned', 'preparing', 'ready', 'served']
+    staff_id: int
+
+
+class CooChatRequest(BaseModel):
     message: str = Field(..., min_length=1, max_length=500)
-    history: list[ChatTurn] = Field(default_factory=list)
+    thread_id: str | None = None
+    briefing_id: int | None = None
 
 
-class ChatResponse(BaseModel):
+class CooChatResponse(BaseModel):
+    thread_id: str
     reply: str
-    model: str
-    context_as_of: str
+    sql: str | None = None
+    rows_preview: list[dict] = Field(default_factory=list)
+    row_count: int = 0
+    model: str | None = None
+
+
+class CooBriefingResponse(BaseModel):
+    id: int
+    business_date: str
+    summary_text: str
+    model: str | None = None
+    kpi_snapshot: dict | None = None
+    created_at: str
+
+
+class SuggestionAction(BaseModel):
+    type: Literal['add_topping', 'add_pizza', 'info']
+    item_id: str | None = None
+    item_name: str | None = None
+
+
+class SuggestionOut(BaseModel):
+    rule: str
+    message: str
+    action: SuggestionAction
+
+
+class SuggestionsResponse(BaseModel):
+    suggestions: list[SuggestionOut] = Field(default_factory=list)

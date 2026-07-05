@@ -222,3 +222,326 @@ describe('parseMenuText (defensive)', () => {
 
   it('returns [] for non-string', () => expect(parseMenuText(null)).toEqual([]))
 })
+
+describe('parseOpsConfig', () => {
+  it('uses defaults for missing config', async () => {
+    const { parseOpsConfig, DEFAULT_OPS_CONFIG } = await import('@/lib/opsConfig')
+    expect(parseOpsConfig(null)).toEqual({ ...DEFAULT_OPS_CONFIG })
+  })
+  it('parses valid ops config', async () => {
+    const { parseOpsConfig } = await import('@/lib/opsConfig')
+    expect(parseOpsConfig({ prep_sla_minutes: 15, queue_poll_ms: 10000 })).toEqual({
+      prep_sla_minutes: 15,
+      queue_poll_ms: 10000,
+      store_open_hour: 11,
+      store_close_hour: 23,
+    })
+  })
+})
+
+describe('analyticsFormat', () => {
+  it('formats KPI primary values', async () => {
+    const { formatKpiPrimary, kitchenProgressLabel } = await import('@/lib/analyticsFormat')
+    expect(formatKpiPrimary('sales', { value: 42000, format: 'currency' })).toBe('₹42,000')
+    expect(formatKpiPrimary('order_times', { value: 11.2, format: 'minutes' })).toBe('11.2 min')
+    expect(formatKpiPrimary('cancellations', { value: 4.2, format: 'percent' })).toBe('4.2%')
+    expect(formatKpiPrimary('order_times', { value: null, format: 'minutes' })).toBe('—')
+    expect(kitchenProgressLabel([
+      { status_code: 'ready' },
+      { status_code: 'preparing' },
+    ])).toBe('Preparing (1/2 ready)')
+  })
+})
+
+describe('parseOpsConfig', () => {
+  it('uses defaults for missing config', async () => {
+    const { parseOpsConfig, DEFAULT_OPS_CONFIG } = await import('@/lib/opsConfig')
+    expect(parseOpsConfig(null)).toEqual({ ...DEFAULT_OPS_CONFIG })
+  })
+  it('parses valid ops config', async () => {
+    const { parseOpsConfig } = await import('@/lib/opsConfig')
+    expect(parseOpsConfig({ prep_sla_minutes: 15, queue_poll_ms: 10000 })).toEqual({
+      prep_sla_minutes: 15,
+      queue_poll_ms: 10000,
+      store_open_hour: 11,
+      store_close_hour: 23,
+    })
+  })
+})
+
+describe('analyticsFormat', () => {
+  it('formats KPI primary values', async () => {
+    const { formatKpiPrimary, kitchenProgressLabel } = await import('@/lib/analyticsFormat')
+    expect(formatKpiPrimary('sales', { value: 4200, format: 'currency' })).toBe('₹4,200')
+    expect(formatKpiPrimary('order_times', { value: 11.2, format: 'minutes' })).toBe('11.2 min')
+    expect(formatKpiPrimary('cancellations', { value: 4.2, format: 'percent' })).toBe('4.2%')
+    expect(kitchenProgressLabel([
+      { status_code: 'ready' },
+      { status_code: 'preparing' },
+    ])).toBe('Preparing (1/2 ready)')
+  })
+})
+
+describe('parseOpsConfig', () => {
+  it('uses defaults for missing config', async () => {
+    const { parseOpsConfig, DEFAULT_OPS_CONFIG } = await import('@/lib/opsConfig')
+    expect(parseOpsConfig(null)).toEqual({ ...DEFAULT_OPS_CONFIG })
+  })
+  it('parses valid ops config', async () => {
+    const { parseOpsConfig } = await import('@/lib/opsConfig')
+    expect(parseOpsConfig({ prep_sla_minutes: 15, queue_poll_ms: 10000 })).toEqual({
+      prep_sla_minutes: 15,
+      queue_poll_ms: 10000,
+      store_open_hour: 11,
+      store_close_hour: 23,
+    })
+  })
+})
+
+describe('analyticsFormat', () => {
+  it('formats KPI primary values', async () => {
+    const { formatKpiPrimary, kitchenProgressLabel } = await import('@/lib/analyticsFormat')
+    expect(formatKpiPrimary('sales', { value: 42000, format: 'currency' })).toBe('₹42,000')
+    expect(formatKpiPrimary('order_times', { value: 11.2, format: 'minutes' })).toBe('11.2 min')
+    expect(formatKpiPrimary('cancellations', { value: 4.2, format: 'percent' })).toBe('4.2%')
+    expect(
+      kitchenProgressLabel([
+        { status_code: 'ready' },
+        { status_code: 'preparing' },
+      ])
+    ).toBe('Preparing (1/2 ready)')
+  })
+})
+
+describe('suggestionStore', () => {
+  it('getBhayyaRuleIntro returns friendly copy per rule', async () => {
+    const { getBhayyaRuleIntro } = await import('@/lib/suggestionStore')
+    expect(getBhayyaRuleIntro('pairing')).toContain('Customers love adding')
+    expect(getBhayyaRuleIntro('hour_bucket')).toContain('around this time')
+    expect(getBhayyaRuleIntro('top_seller')).toContain('best seller')
+    expect(getBhayyaRuleIntro('attach_rate')).toContain('Most customers add')
+    expect(getBhayyaRuleIntro('bulk_discount', { message: 'Add 1 more pizza for 10% off your whole order.' }))
+      .toBe('Add 1 more pizza for 10% off your whole order.')
+    expect(getBhayyaRuleIntro('unknown', { message: 'Fallback line.' })).toBe('Fallback line.')
+  })
+
+  it('buildBulkDiscountSuggestion when one pizza short of min qty', async () => {
+    const { buildBulkDiscountSuggestion, DEFAULT_SUGGESTION_CONFIG } = await import('@/lib/suggestionStore')
+    const taxConfig = { discount: { rate: 0.1, minQuantity: 5 } }
+    const hit = buildBulkDiscountSuggestion({
+      cartTotalQty: 3,
+      lineQty: 1,
+      taxConfig,
+      config: DEFAULT_SUGGESTION_CONFIG,
+    })
+    expect(hit?.rule).toBe('bulk_discount')
+    expect(hit?.message).toContain('10%')
+    expect(buildBulkDiscountSuggestion({ cartTotalQty: 2, lineQty: 1, taxConfig, config: DEFAULT_SUGGESTION_CONFIG })).toBeNull()
+  })
+
+  it('mergeSuggestions filters sold-out and selected toppings', async () => {
+    const { mergeSuggestions, DEFAULT_SUGGESTION_CONFIG } = await import('@/lib/suggestionStore')
+    const toppings = [{ id: 'T1', name: 'Extra Cheese', price: 40 }]
+    const api = [{
+      rule: 'pairing',
+      message: 'x',
+      action: { type: 'add_topping', item_id: 'T1', item_name: 'Extra Cheese' },
+    }]
+    const soldOut = new Set(['T1'])
+    expect(mergeSuggestions(api, { toppings, soldOutToppings: soldOut, config: DEFAULT_SUGGESTION_CONFIG }).length).toBe(0)
+
+    const merged = mergeSuggestions(api, {
+      toppings,
+      soldOutToppings: new Set(),
+      selectedToppingIds: [],
+      config: DEFAULT_SUGGESTION_CONFIG,
+    })
+    expect(merged).toHaveLength(1)
+    expect(merged[0].action.item_id).toBe('T1')
+  })
+
+  it('suggestionKey includes action type for pizza vs topping', async () => {
+    const { suggestionKey } = await import('@/lib/suggestionStore')
+    expect(
+      suggestionKey({ rule: 'hour_bucket', action: { type: 'add_pizza', item_id: 'P5' } })
+    ).toBe('hour_bucket-add_pizza-P5')
+    expect(
+      suggestionKey({ rule: 'pairing', action: { type: 'add_topping', item_id: 'T1' } })
+    ).toBe('pairing-add_topping-T1')
+  })
+
+  it('mergeSuggestions filters add_pizza for current or sold-out pizza', async () => {
+    const { mergeSuggestions, DEFAULT_SUGGESTION_CONFIG } = await import('@/lib/suggestionStore')
+    const pizzas = [
+      { id: 'P1', name: 'Margherita', price: 200 },
+      { id: 'P5', name: 'Farm House', price: 280 },
+    ]
+    const api = [{
+      rule: 'hour_bucket',
+      message: 'Popular this lunch: Farm House.',
+      action: { type: 'add_pizza', item_id: 'P5', item_name: 'Farm House' },
+    }]
+
+    expect(
+      mergeSuggestions(api, {
+        pizzas,
+        currentPizzaId: 'P5',
+        config: DEFAULT_SUGGESTION_CONFIG,
+      }).length
+    ).toBe(0)
+
+    expect(
+      mergeSuggestions(api, {
+        pizzas,
+        currentPizzaId: 'P1',
+        soldOutPizzas: new Set(['P5']),
+        config: DEFAULT_SUGGESTION_CONFIG,
+      }).length
+    ).toBe(0)
+
+    const merged = mergeSuggestions(api, {
+      pizzas,
+      currentPizzaId: 'P1',
+      config: DEFAULT_SUGGESTION_CONFIG,
+    })
+    expect(merged).toHaveLength(1)
+    expect(merged[0].action.item_id).toBe('P5')
+  })
+
+  it('mergeSuggestions resolves add_pizza by name when item_id is null', async () => {
+    const { mergeSuggestions, DEFAULT_SUGGESTION_CONFIG } = await import('@/lib/suggestionStore')
+    const pizzas = [
+      { id: 'P1', name: 'Margherita', price: 200 },
+      { id: 'P5', name: 'Farm House', price: 280 },
+    ]
+    const api = [{
+      rule: 'hour_bucket',
+      message: 'Popular this lunch: Farm House.',
+      action: { type: 'add_pizza', item_id: null, item_name: 'Farm House' },
+    }]
+
+    const merged = mergeSuggestions(api, {
+      pizzas,
+      currentPizzaId: 'P1',
+      config: DEFAULT_SUGGESTION_CONFIG,
+    })
+    expect(merged).toHaveLength(1)
+    expect(merged[0].action.item_id).toBe('P5')
+  })
+
+  it('mergeMenuSuggestions resolves add_pizza by name when item_id is null', async () => {
+    const { mergeMenuSuggestions, DEFAULT_SUGGESTION_CONFIG } = await import('@/lib/suggestionStore')
+    const pizzas = [
+      { id: 'P1', name: 'Margherita', price: 200 },
+      { id: 'P5', name: 'Farm House', price: 280 },
+    ]
+    const api = [{
+      rule: 'top_seller',
+      message: 'Popular: Farm House.',
+      action: { type: 'add_pizza', item_id: null, item_name: 'Farm House' },
+    }]
+
+    const merged = mergeMenuSuggestions(api, {
+      pizzas,
+      config: DEFAULT_SUGGESTION_CONFIG,
+    })
+    expect(merged).toHaveLength(1)
+    expect(merged[0].action.item_id).toBe('P5')
+  })
+
+  it('mergeMenuSuggestions filters cart and sold-out pizzas', async () => {
+    const { mergeMenuSuggestions, DEFAULT_SUGGESTION_CONFIG } = await import('@/lib/suggestionStore')
+    const pizzas = [
+      { id: 'P1', name: 'Margherita', price: 200 },
+      { id: 'P5', name: 'Farm House', price: 280 },
+    ]
+    const api = [
+      {
+        rule: 'hour_bucket',
+        message: 'Popular this lunch: Farm House.',
+        action: { type: 'add_pizza', item_id: 'P5', item_name: 'Farm House' },
+      },
+      {
+        rule: 'top_seller',
+        message: 'Popular: Margherita.',
+        action: { type: 'add_pizza', item_id: 'P1', item_name: 'Margherita' },
+      },
+    ]
+
+    expect(
+      mergeMenuSuggestions(api, {
+        pizzas,
+        cartPizzaIds: ['P5'],
+        config: DEFAULT_SUGGESTION_CONFIG,
+      })
+    ).toHaveLength(1)
+
+    expect(
+      mergeMenuSuggestions(api, {
+        pizzas,
+        soldOutPizzas: new Set(['P1']),
+        config: DEFAULT_SUGGESTION_CONFIG,
+      })
+    ).toHaveLength(1)
+  })
+})
+
+describe('staffRoles', () => {
+  it('allows manager and admin to manage orders', async () => {
+    const { canManageOrders } = await import('../staffRoles')
+    expect(canManageOrders('manager')).toBe(true)
+    expect(canManageOrders('admin')).toBe(true)
+    expect(canManageOrders('Manager')).toBe(true)
+  })
+
+  it('denies regular staff', async () => {
+    const { canManageOrders } = await import('../staffRoles')
+    expect(canManageOrders('staff')).toBe(false)
+    expect(canManageOrders('')).toBe(false)
+  })
+})
+
+describe('orderDisplay', () => {
+  it('normalises order status', async () => {
+    const { normOrderStatus } = await import('../orderDisplay')
+    expect(normOrderStatus('completed')).toBe('completed')
+    expect(normOrderStatus('cancelled')).toBe('cancelled')
+    expect(normOrderStatus('placed')).toBe('active')
+  })
+
+  it('summarises line items', async () => {
+    const { summariseOrderItems } = await import('../orderDisplay')
+    expect(
+      summariseOrderItems({
+        items: [{ pizza: { name: 'Margherita' }, quantity: 2 }],
+      })
+    ).toBe('Margherita ×2')
+  })
+})
+
+describe('analyticsDefinitions', () => {
+  it('has non-empty definitions for every category, detail, and panel key', async () => {
+    const {
+      CATEGORY_KEYS,
+      DETAIL_KEYS,
+      PANEL_KEYS,
+      getCategoryDefinition,
+      getDetailDefinition,
+      getPanelDefinition,
+      detailKeyFromQuadrant,
+    } = await import('@/lib/analyticsDefinitions')
+
+    for (const key of CATEGORY_KEYS) {
+      expect(getCategoryDefinition(key), key).toMatch(/\S/)
+    }
+    for (const key of DETAIL_KEYS) {
+      expect(getDetailDefinition(key), key).toMatch(/\S/)
+    }
+    for (const key of PANEL_KEYS) {
+      expect(getPanelDefinition(key), key).toMatch(/\S/)
+    }
+
+    expect(detailKeyFromQuadrant('Promote')).toBe('promote')
+    expect(getDetailDefinition(detailKeyFromQuadrant('Stars'))).toMatch(/hidden gems/i)
+  })
+})

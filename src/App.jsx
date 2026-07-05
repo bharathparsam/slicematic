@@ -4,6 +4,8 @@ import TableSelect from '@/components/TableSelect'
 import OrderScreen from '@/components/order/OrderScreen'
 import DoneScreen from '@/components/order/DoneScreen'
 import PizzaLoader from '@/components/order/PizzaLoader'
+import EmployeeBoard from '@/components/EmployeeBoard'
+import ManagerBoard from '@/components/ManagerBoard'
 import AdminOrdersTable from '@/components/AdminOrdersTable'
 import { Button } from '@/components/ui/primitives'
 import { loadAllMenus } from '@/lib/menuLoader'
@@ -13,10 +15,11 @@ import { validateName, validatePhone } from '@/lib/validators'
 import { computeOrderBill } from '@/lib/billing'
 import { saveOrder, updateOrder, getOccupiedTables } from '@/lib/orderStore'
 import { listTables, mergeTableLabels } from '@/lib/tableStore'
+import { getAllSoldOut } from '@/lib/menuStore'
 import { getSession, onAuthChange } from '@/lib/auth'
 
 export default function App() {
-  const [view, setView] = useState('order') // 'order' | 'admin'
+  const [view, setView] = useState('order') // 'order' | 'kitchen' | 'manager' | 'admin'
   // A saved order pulled in from Admin for full editing (null = new order).
   const [editingOrder, setEditingOrder] = useState(null)
   // Admin auth session (Supabase). Owned here so a signed-in admin survives the
@@ -61,11 +64,27 @@ export default function App() {
           editingOrder={editingOrder}
           onDoneEditing={doneEditing}
           onAdmin={() => goToView('admin')}
+          onKitchen={() => goToView('kitchen')}
+          onManager={() => goToView('manager')}
+        />
+      ) : view === 'kitchen' ? (
+        <EmployeeBoard
+          onOrder={() => goToView('order')}
+          onManager={() => goToView('manager')}
+          onAdmin={() => goToView('admin')}
+        />
+      ) : view === 'manager' ? (
+        <ManagerBoard
+          onOrder={() => goToView('order')}
+          onKitchen={() => goToView('kitchen')}
+          onAdmin={() => goToView('admin')}
         />
       ) : (
         <AdminOrdersTable
           onModify={startModify}
           onExit={() => goToView('order')}
+          onKitchen={() => goToView('kitchen')}
+          onManager={() => goToView('manager')}
           session={session}
           authReady={authReady}
         />
@@ -117,11 +136,17 @@ function resolveCartFromOrder(order, menu) {
   }))
 }
 
-function OrderFlow({ editingOrder = null, onDoneEditing, onAdmin }) {
+function OrderFlow({ editingOrder = null, onDoneEditing, onAdmin, onKitchen, onManager }) {
   const isEditing = !!editingOrder
 
   // --- Load state (menu required; tax + tables self-default) ----------
   const [menu, setMenu] = useState(null)
+  // Sold-out ids per menu type: { pizzas, bases, toppings } (each a Set).
+  const [soldOut, setSoldOut] = useState(() => ({
+    pizzas: new Set(),
+    bases: new Set(),
+    toppings: new Set(),
+  }))
   const [taxConfig, setTaxConfig] = useState(DEFAULT_TAX_CONFIG)
   const [tables, setTables] = useState(DEFAULT_TABLES.tables)
   const [tableLabel, setTableLabel] = useState(DEFAULT_TABLES.label)
@@ -140,8 +165,14 @@ function OrderFlow({ editingOrder = null, onDoneEditing, onAdmin }) {
     setLoading(true)
     setLoadError('')
     try {
-      const [data, cfg, tbl] = await Promise.all([loadAllMenus(), loadTaxConfig(), loadTables()])
+      const [data, cfg, tbl, sold] = await Promise.all([
+        loadAllMenus(),
+        loadTaxConfig(),
+        loadTables(),
+        getAllSoldOut(),
+      ])
       setMenu(data)
+      setSoldOut(sold)
       setTaxConfig(cfg)
       setTableLabel(tbl.label)
       setTables(await loadTablesFromApi(tbl))
@@ -169,6 +200,14 @@ function OrderFlow({ editingOrder = null, onDoneEditing, onAdmin }) {
   // --- Stage: pick a table, then order (editing skips table select) ---
   const [stage, setStage] = useState(isEditing ? 'order' : 'table') // 'table' | 'order'
   const [table, setTable] = useState(editingOrder?.table ?? '')
+
+  // No router = the window keeps its scroll position across stage swaps. After
+  // "Start ordering" the user is usually scrolled down the table list, so the
+  // next screen would open mid-page. Reset to the top on every stage change
+  // (both table→order and the "Change table" trip back).
+  useEffect(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: 'auto' })
+  }, [stage])
 
   // Tables with an open (active) order — blocked until admin completes/cancels.
   const [occupiedTables, setOccupiedTables] = useState([])
@@ -398,6 +437,8 @@ function OrderFlow({ editingOrder = null, onDoneEditing, onAdmin }) {
             onSelect={setTable}
             onStart={() => setStage('order')}
             onAdmin={onAdmin}
+            onKitchen={onKitchen}
+            onManager={onManager}
           />
         </motion.div>
       </AnimatePresence>
@@ -408,6 +449,7 @@ function OrderFlow({ editingOrder = null, onDoneEditing, onAdmin }) {
   return (
     <OrderScreen
       menu={menu}
+      soldOut={soldOut}
       taxConfig={taxConfig}
       table={table}
       label={tableLabel}
@@ -432,6 +474,8 @@ function OrderFlow({ editingOrder = null, onDoneEditing, onAdmin }) {
       onConfirm={handleConfirmOrder}
       onChangeTable={goToTableStage}
       onAdmin={onAdmin}
+      onKitchen={onKitchen}
+      onManager={onManager}
       onDiscardEdit={onDoneEditing}
     />
   )

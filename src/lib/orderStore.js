@@ -65,10 +65,12 @@ function toCreatePayload(order) {
 /** Map a GET /api/orders row back into the shape the UI already expects. */
 export function mapApiOrder(row) {
   const items = (row.items ?? []).map((it, i) => ({
+    id: it.id,
     base: { id: `b-${i}`, name: it.base ?? '—', price: 0 },
     pizza: { id: `p-${i}`, name: it.pizza_type ?? '—', price: 0 },
     toppings: (it.toppings ?? []).map((name, j) => ({ id: `t-${i}-${j}`, name, price: 0 })),
     quantity: it.quantity,
+    status_code: it.status_code ?? null,
     unitPrice: 0,
     lineSubtotal: Number(it.line_subtotal ?? 0),
     lineDiscount: Number(it.line_discount ?? 0),

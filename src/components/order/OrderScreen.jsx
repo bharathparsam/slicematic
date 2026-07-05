@@ -1,9 +1,19 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { formatCurrency } from '@/lib/billing'
+import {
+  DEFAULT_SUGGESTION_CONFIG,
+  dismissSuggestion,
+  getMenuSuggestions,
+  loadSuggestionConfig,
+  mergeMenuSuggestions,
+  suggestionKey,
+} from '@/lib/suggestionStore'
+import ViewNav from '@/components/ViewNav'
 import CustomizeSheet from './CustomizeSheet'
 import CartSheet from './CartSheet'
 import ReviewModal from './ReviewModal'
 import PizzaLoader from './PizzaLoader'
+import SuggestionBhayya from './SuggestionBhayya'
 import { C, FONT_DISPLAY, FONT_MONO, shortName } from './theme'
 
 // Contextual, order-specific quips for the "saving" moment.
@@ -26,6 +36,7 @@ const SAVING_QUIPS = [
  */
 export default function OrderScreen({
   menu,
+  soldOut,
   taxConfig,
   table,
   label,
@@ -47,11 +58,18 @@ export default function OrderScreen({
   onConfirm,
   onChangeTable,
   onAdmin,
+  onKitchen,
+  onManager,
   onDiscardEdit,
 }) {
   const [sheet, setSheet] = useState(null) // 'customize' | 'cart' | null
   const [activePizza, setActivePizza] = useState(null)
   const [showReview, setShowReview] = useState(false)
+  const [suggestionConfig, setSuggestionConfig] = useState(null)
+  const [apiMenuSuggestions, setApiMenuSuggestions] = useState([])
+  const [menuSuggestionsLoading, setMenuSuggestionsLoading] = useState(false)
+  const [menuDismissTick, setMenuDismissTick] = useState(0)
+  const menuDebounceRef = useRef(null)
 
   const pizzas = menu?.pizzas ?? []
   const minBasePrice = (menu?.bases ?? []).reduce(
@@ -68,10 +86,57 @@ export default function OrderScreen({
   const hasCart = bill.lines.length > 0
   const num = shortName(table, label)
 
+  const soldOutPizzaIds = soldOut?.pizzas ? [...soldOut.pizzas] : []
+  const cartPizzaIds = bill.lines.map((l) => l.pizza?.id).filter(Boolean)
+
+  useEffect(() => {
+    loadSuggestionConfig().then(setSuggestionConfig)
+  }, [])
+
+  useEffect(() => {
+    if (menuDebounceRef.current) clearTimeout(menuDebounceRef.current)
+    menuDebounceRef.current = setTimeout(async () => {
+      setMenuSuggestionsLoading(true)
+      const data = await getMenuSuggestions({
+        cartQty: bill?.totalQuantity ?? 0,
+        excludePizzaIds: soldOutPizzaIds,
+      })
+      setApiMenuSuggestions(data.suggestions ?? [])
+      setMenuSuggestionsLoading(false)
+    }, 300)
+
+    return () => {
+      if (menuDebounceRef.current) clearTimeout(menuDebounceRef.current)
+    }
+  }, [bill?.totalQuantity, soldOutPizzaIds.join(',')])
+
+  const menuSuggestions = mergeMenuSuggestions(apiMenuSuggestions, {
+    config: suggestionConfig ?? DEFAULT_SUGGESTION_CONFIG,
+    soldOutPizzas: soldOut?.pizzas,
+    cartPizzaIds,
+    pizzas,
+  })
+  void menuDismissTick
+
   function openCustomize(pizza) {
     setActivePizza(pizza)
     setSheet('customize')
   }
+  function handleMenuDismiss(suggestion) {
+    dismissSuggestion(suggestionKey(suggestion))
+    setMenuDismissTick((n) => n + 1)
+  }
+
+  function handleApplyMenuPizza(pizzaId) {
+    const target = pizzas.find((p) => p.id === pizzaId)
+    if (target && !soldOut?.pizzas?.has?.(pizzaId)) openCustomize(target)
+  }
+
+  function handleApplyCustomizePizza(pizzaId) {
+    const target = pizzas.find((p) => p.id === pizzaId)
+    if (target && !soldOut?.pizzas?.has?.(pizzaId)) setActivePizza(target)
+  }
+
   function handleAdd(combo) {
     onAdd(combo)
     setSheet(null)
@@ -94,39 +159,29 @@ export default function OrderScreen({
     >
       {/* TOP BAR */}
       <div
-        className="sticky top-0 z-30 flex items-center justify-between px-5 py-3"
+        className="sticky top-0 z-30 flex flex-wrap items-center justify-between gap-2 px-4 py-3 sm:px-5"
         style={{ background: 'rgba(251,245,234,0.92)', backdropFilter: 'blur(8px)', borderBottom: `1px solid ${C.border}` }}
       >
-        <div className="flex items-center gap-2.5">
+        <div className="flex min-w-0 shrink-0 items-center gap-2.5">
           <div
             className="flex h-[34px] w-[34px] items-center justify-center rounded-[10px]"
             style={{ background: C.red, boxShadow: '0 4px 12px rgba(197,52,28,0.28)' }}
           >
             <span style={{ fontFamily: FONT_DISPLAY, color: C.cream, fontSize: 19, lineHeight: 1 }}>S</span>
           </div>
-          <div className="leading-tight">
+          <div className="min-w-0 leading-tight">
             <div style={{ fontFamily: FONT_DISPLAY, fontSize: 17 }}>SliceMatic</div>
             <div className="font-semibold uppercase" style={{ fontSize: 10, letterSpacing: '0.12em', color: C.gold }}>
-              Order Desk
+              Orders
             </div>
           </div>
         </div>
-        <div className="flex rounded-full p-[3px]" style={{ background: '#f0e5d2' }}>
-          <span
-            className="rounded-full px-[15px] py-1.5 font-bold"
-            style={{ fontSize: 13, background: C.cream, boxShadow: '0 1px 2px rgba(0,0,0,0.08)' }}
-          >
-            Order
-          </span>
-          <button
-            type="button"
-            onClick={onAdmin}
-            className="rounded-full px-[15px] py-1.5 font-semibold"
-            style={{ fontSize: 13, color: C.brown2 }}
-          >
-            Admin
-          </button>
-        </div>
+        <ViewNav
+          active="order"
+          onKitchen={onKitchen}
+          onManager={onManager}
+          onAdmin={onAdmin}
+        />
       </div>
 
       {/* EDIT BANNER */}
@@ -167,44 +222,83 @@ export default function OrderScreen({
         <p style={{ fontSize: 14, color: C.brown2, margin: '6px 0 20px' }}>
           Tap a pizza to pick a base and toppings.
         </p>
+        <SuggestionBhayya
+          variant="menu"
+          suggestions={menuSuggestions}
+          loading={menuSuggestionsLoading}
+          onApplyPizza={handleApplyMenuPizza}
+          onDismiss={handleMenuDismiss}
+        />
         <div className="grid grid-cols-2 gap-3">
-          {pizzas.map((p) => (
-            <button
-              key={p.id}
-              type="button"
-              onClick={() => openCustomize(p)}
-              className="flex flex-col rounded-2xl p-[11px] text-left transition-transform active:scale-[0.98]"
-              style={{ background: '#fff', border: `1px solid ${C.border}`, boxShadow: `0 2px 0 ${C.border}` }}
-            >
-              <div
-                className="relative mb-[11px] flex aspect-square items-center justify-center overflow-hidden rounded-xl text-3xl"
-                style={{ background: 'repeating-linear-gradient(135deg,#efdcc0,#efdcc0 8px,#e9d3b2 8px,#e9d3b2 16px)' }}
-                aria-hidden="true"
+          {pizzas.map((p) => {
+            const isSold = !!soldOut?.pizzas?.has?.(p.id)
+            return (
+              <button
+                key={p.id}
+                type="button"
+                onClick={() => !isSold && openCustomize(p)}
+                disabled={isSold}
+                aria-disabled={isSold || undefined}
+                className="flex flex-col rounded-2xl p-[11px] text-left transition-transform active:scale-[0.98] disabled:active:scale-100"
+                style={{
+                  background: '#fff',
+                  border: `1px solid ${C.border}`,
+                  boxShadow: `0 2px 0 ${C.border}`,
+                  opacity: isSold ? 0.6 : 1,
+                  cursor: isSold ? 'not-allowed' : 'pointer',
+                }}
               >
-                🍕
-                {inCart[p.id] ? (
-                  <span
-                    className="absolute right-[7px] top-[7px] flex h-5 w-5 items-center justify-center rounded-full text-white"
-                    style={{ background: C.green, fontSize: 10, fontWeight: 800 }}
-                  >
-                    {inCart[p.id]}
-                  </span>
-                ) : null}
-              </div>
-              <div style={{ fontSize: 15, fontWeight: 800, color: C.ink, lineHeight: 1.15 }}>{p.name}</div>
-              <div className="mt-1.5 flex items-center justify-between">
-                <span style={{ fontSize: 12.5, color: C.brown2, fontWeight: 600 }}>
-                  from {formatCurrency(p.price + minBasePrice)}
-                </span>
-                <span
-                  className="flex h-[26px] w-[26px] items-center justify-center rounded-lg leading-none"
-                  style={{ background: C.red, color: C.cream, fontSize: 18, fontWeight: 700 }}
+                <div
+                  className="relative mb-[11px] flex aspect-square items-center justify-center overflow-hidden rounded-xl text-3xl"
+                  style={{
+                    background: 'repeating-linear-gradient(135deg,#efdcc0,#efdcc0 8px,#e9d3b2 8px,#e9d3b2 16px)',
+                    filter: isSold ? 'grayscale(1)' : 'none',
+                  }}
+                  aria-hidden="true"
                 >
-                  +
-                </span>
-              </div>
-            </button>
-          ))}
+                  🍕
+                  {isSold ? (
+                    <span
+                      className="absolute inset-x-0 bottom-0 py-1 text-center uppercase"
+                      style={{
+                        background: 'rgba(58,36,24,0.82)',
+                        color: C.cream,
+                        fontSize: 10,
+                        fontWeight: 800,
+                        letterSpacing: '0.08em',
+                      }}
+                    >
+                      Sold out
+                    </span>
+                  ) : inCart[p.id] ? (
+                    <span
+                      className="absolute right-[7px] top-[7px] flex h-5 w-5 items-center justify-center rounded-full text-white"
+                      style={{ background: C.green, fontSize: 10, fontWeight: 800 }}
+                    >
+                      {inCart[p.id]}
+                    </span>
+                  ) : null}
+                </div>
+                <div style={{ fontSize: 15, fontWeight: 800, color: C.ink, lineHeight: 1.15 }}>{p.name}</div>
+                <div className="mt-1.5 flex items-center justify-between">
+                  <span style={{ fontSize: 12.5, color: C.brown2, fontWeight: 600 }}>
+                    {isSold ? 'Unavailable' : `from ${formatCurrency(p.price + minBasePrice)}`}
+                  </span>
+                  <span
+                    className="flex h-[26px] w-[26px] items-center justify-center rounded-lg leading-none"
+                    style={{
+                      background: isSold ? C.disabledBg : C.red,
+                      color: isSold ? C.disabledFg : C.cream,
+                      fontSize: 18,
+                      fontWeight: 700,
+                    }}
+                  >
+                    +
+                  </span>
+                </div>
+              </button>
+            )
+          })}
         </div>
       </section>
 
@@ -244,9 +338,15 @@ export default function OrderScreen({
         pizza={activePizza}
         bases={menu?.bases ?? []}
         toppings={menu?.toppings ?? []}
+        pizzas={pizzas}
+        soldOutBases={soldOut?.bases}
+        soldOutToppings={soldOut?.toppings}
+        soldOutPizzas={soldOut?.pizzas}
         taxConfig={taxConfig}
+        cartTotalQty={bill?.totalQuantity ?? 0}
         onClose={() => setSheet(null)}
         onAdd={handleAdd}
+        onApplyPizza={handleApplyCustomizePizza}
       />
 
       <CartSheet
@@ -258,6 +358,7 @@ export default function OrderScreen({
         custErrors={custErrors}
         payment={payment}
         taxConfig={taxConfig}
+        cartTotalQty={bill?.totalQuantity ?? 0}
         onClose={() => setSheet(null)}
         onQty={onQty}
         onRemove={handleRemove}

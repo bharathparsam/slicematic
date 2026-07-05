@@ -20,6 +20,11 @@
 --   name/phone -> users (+ snapshots on orders), items[] -> order_items +
 --   order_item_selections, paymentMode -> payments.method, gst/cgst/sgst/rate ->
 --   orders.* tax columns, status active/completed/cancelled -> order_statuses.
+--
+-- Scope       : COMPLETE single-file schema. Everything is here — ordering,
+--   item-level kitchen ops (statuses + timestamps + event log), staff PIN auth,
+--   menu availability, AI brief/chat persistence, and the reporting MVs. There
+--   is no separate migrations folder; apply this one file to a fresh database.
 -- ============================================================================
 
 create extension if not exists pgcrypto;   -- gen_random_uuid()
@@ -62,6 +67,7 @@ create table staff (
   auth_user_id  uuid,                              -- link to Supabase auth.users
   full_name     text not null,
   role          text not null default 'staff',     -- staff | manager | admin
+  pin           char(4),                            -- 4-digit kitchen/manager login (demo auth)
   is_active     boolean not null default true,
   created_at    timestamptz not null default now(),
   updated_at    timestamptz not null default now()
@@ -199,6 +205,16 @@ create table order_statuses (
   is_cancelled  boolean not null default false
 );
 
+-- Item-level (kitchen) status lookup — mirrors order_statuses but for a single
+-- built pizza as it moves through the kitchen. Powers the Employee board + prep
+-- analytics. order_items.status_id references this.
+create table order_item_statuses (
+  id            smallint generated always as identity primary key,
+  code          text not null unique,               -- queued|assigned|preparing|ready|served|cancelled
+  name          text not null,
+  sort_order    smallint not null
+);
+
 -- ===========================================================================
 -- TRANSACTIONS
 -- ===========================================================================
@@ -247,10 +263,14 @@ create table orders (
   completed_at        timestamptz,
   cancelled_at        timestamptz,
   cancel_reason       text,
+  cancelled_from_status_id smallint references order_statuses(id), -- stage the order was in at cancel
   notes               text,
   updated_at          timestamptz not null default now(),
 
-  unique (store_id, order_code),
+  -- order_code / order_sequence RESET daily (a shift rolls at day_cutoff), so
+  -- both must be unique PER business_date — not globally, or day 2's SM-0001
+  -- collides with day 1's. (Bug fix: this used to be unique(store_id, order_code).)
+  unique (store_id, business_date, order_code),
   unique (store_id, business_date, order_sequence)
 );
 
@@ -266,6 +286,16 @@ create table order_items (
   line_tax      numeric(12,2) not null default 0,
   line_total    numeric(12,2) not null check (line_total >= 0),
   notes         text,
+
+  -- Item-level kitchen lifecycle (Employee board + prep-time analytics).
+  status_id         smallint references order_item_statuses(id),
+  assigned_staff_id bigint references staff(id),
+  queued_at         timestamptz,
+  assigned_at       timestamptz,
+  preparing_at      timestamptz,
+  ready_at          timestamptz,
+  served_at         timestamptz,
+
   unique (order_id, line_no)
 );
 
@@ -308,6 +338,18 @@ create table order_status_events (
   occurred_at     timestamptz not null default now()
 );
 
+-- Append-only ITEM-level status log (who moved which pizza to which kitchen
+-- status, when). Powers avg prep time, p90 and the cancellation-stage breakdown.
+create table order_item_status_events (
+  id              bigint generated always as identity primary key,
+  order_item_id   bigint not null references order_items(id) on delete cascade,
+  from_status_id  smallint references order_item_statuses(id),
+  to_status_id    smallint not null references order_item_statuses(id),
+  actor_staff_id  bigint references staff(id),
+  reason          text,
+  occurred_at     timestamptz not null default now()
+);
+
 -- Guest satisfaction (feeds the future AI "COO insights").
 create table order_feedback (
   id            bigint generated always as identity primary key,
@@ -316,6 +358,58 @@ create table order_feedback (
   comment       text,
   created_at    timestamptz not null default now(),
   unique (order_id)
+);
+
+-- ===========================================================================
+-- AI  (COO daily brief + "Ask COO" NL->SQL chat) persistence
+-- ===========================================================================
+-- One stored brief per trading day; chat threads/messages log the Q&A (with the
+-- SQL that was run, for the "show SQL" demo toggle + audit).
+create table ai_briefings (
+  id            bigint generated always as identity primary key,
+  store_id      bigint not null references stores(id),
+  business_date date not null,
+  kpi_snapshot  jsonb not null,
+  summary_text  text not null,
+  model         text,
+  created_at    timestamptz not null default now(),
+  unique (store_id, business_date)
+);
+
+create table ai_chat_threads (
+  id            uuid primary key default gen_random_uuid(),
+  store_id      bigint not null references stores(id),
+  briefing_id   bigint references ai_briefings(id),
+  created_at    timestamptz not null default now()
+);
+
+create table ai_chat_messages (
+  id              bigint generated always as identity primary key,
+  thread_id       uuid not null references ai_chat_threads(id) on delete cascade,
+  role            text not null check (role in ('user', 'assistant', 'system')),
+  content         text not null,
+  sql_executed    text,                              -- audit / "show SQL" for demo
+  query_row_count int,
+  created_at      timestamptz not null default now()
+);
+
+-- ===========================================================================
+-- MENU AVAILABILITY  (sold-out toggles for the admin Menu tab)
+-- ===========================================================================
+-- The live menu is served from the public/data/*.txt files, keyed by a stable
+-- id per line (e.g. 'P1'). This table records ONLY the mutable availability
+-- overlay for those ids — a row exists once an item has been toggled. Absence
+-- of a row means "available". Decoupled from menu_units (which is order-derived)
+-- so it works for items that have never been ordered.
+create table menu_availability (
+  id            bigint generated always as identity primary key,
+  store_id      bigint not null references stores(id),
+  item_type     menu_item_type not null,           -- 'pizza' today
+  item_id       text not null,                      -- stable menu-file id, e.g. 'P1'
+  item_name     text,                               -- snapshot for admin display
+  is_sold_out   boolean not null default false,
+  updated_at    timestamptz not null default now(),
+  unique (store_id, item_type, item_id)
 );
 
 -- ---------------------------------------------------------------------------
@@ -328,6 +422,7 @@ create trigger t_tables_updated     before update on store_tables   for each row
 create trigger t_sessions_updated   before update on table_sessions for each row execute function set_updated_at();
 create trigger t_units_updated      before update on menu_units     for each row execute function set_updated_at();
 create trigger t_orders_updated     before update on orders         for each row execute function set_updated_at();
+create trigger t_menu_avail_updated before update on menu_availability for each row execute function set_updated_at();
 
 -- ---------------------------------------------------------------------------
 -- Indexes tuned for the dashboards
@@ -344,6 +439,9 @@ create index idx_payments_order         on payments (order_id);
 create index idx_payments_method        on payments (method, paid_at);
 create index idx_status_events_order    on order_status_events (order_id, occurred_at);
 create index idx_sessions_table         on table_sessions (table_id, status);
+create index idx_order_items_status     on order_items (status_id);
+create index idx_item_events_item       on order_item_status_events (order_item_id, occurred_at);
+create index idx_ai_chat_messages_thread on ai_chat_messages (thread_id, created_at);
 
 -- ===========================================================================
 -- SEED — lookups (safe to run once)
@@ -358,6 +456,33 @@ insert into order_statuses (code, name, sort_order, is_open, is_settled, is_canc
   ('cancelled', 'Cancelled', 70, false, false, true);
 -- App mapping: current MVP 'active' -> placed/preparing/ready/served (is_open),
 --              'completed' -> completed (is_settled), 'cancelled' -> cancelled.
+
+insert into order_item_statuses (code, name, sort_order) values
+  ('queued',    'Queued',    10),
+  ('assigned',  'Assigned',  20),
+  ('preparing', 'Preparing', 30),
+  ('ready',     'Ready',     40),
+  ('served',    'Served',    50),
+  ('cancelled', 'Cancelled', 60);
+
+-- Demo staff for PIN login (kitchen/manager). Creates the store row if a fresh
+-- DB has none yet. Remove or replace these for a real deployment.
+do $$
+declare sid bigint;
+begin
+  select id into sid from stores order by id limit 1;
+  if sid is null then
+    insert into stores (name, timezone, day_cutoff)
+    values ('SliceMatic Delhi', 'Asia/Kolkata', '00:00') returning id into sid;
+  end if;
+  if not exists (select 1 from staff where store_id = sid and full_name = 'Raj Kumar') then
+    insert into staff (store_id, full_name, role, pin, is_active) values
+      (sid, 'Raj Kumar',   'staff',   '1234', true),
+      (sid, 'Priya Singh', 'staff',   '2345', true),
+      (sid, 'Amit Sharma', 'manager', '3456', true),
+      (sid, 'Neha Verma',  'staff',   '4567', true);
+  end if;
+end $$;
 
 -- ===========================================================================
 -- REPORTING LAYER — flat, dashboard-friendly (refresh on a schedule / trigger)
@@ -445,6 +570,52 @@ from table_sessions ts
 where ts.status = 'closed' and ts.closed_at is not null
 group by ts.store_id, ts.table_id, (ts.seated_at at time zone 'Asia/Kolkata')::date;
 
+-- Item prep time — avg + p90 minutes queued->ready, per pizza (settled orders).
+create materialized view mv_item_prep_stats as
+select
+  o.store_id,
+  sel.menu_unit_id,
+  sel.item_name as pizza_name,
+  count(*) as items_completed,
+  round(avg(extract(epoch from (oi.ready_at - oi.queued_at)) / 60.0), 1) as avg_prep_minutes,
+  round((percentile_cont(0.9) within group (
+    order by extract(epoch from (oi.ready_at - oi.queued_at)) / 60.0
+  ))::numeric, 1) as p90_prep_minutes
+from order_items oi
+join orders o on o.id = oi.order_id
+join order_item_selections sel on sel.order_item_id = oi.id and sel.role = 'pizza'
+join order_statuses s on s.id = o.status_id
+where oi.ready_at is not null and oi.queued_at is not null and s.is_settled
+group by o.store_id, sel.menu_unit_id, sel.item_name;
+
+-- Top cancelled pizzas (order-level cancels).
+create materialized view mv_cancellation_items as
+select
+  o.store_id,
+  sel.item_name as pizza_name,
+  count(distinct o.id) as cancelled_orders,
+  sum(oi.quantity) as cancelled_units
+from orders o
+join order_items oi on oi.order_id = o.id
+join order_item_selections sel on sel.order_item_id = oi.id and sel.role = 'pizza'
+join order_statuses s on s.id = o.status_id
+where s.is_cancelled
+group by o.store_id, sel.item_name;
+
+-- Which stage orders were cancelled from (from the status-event log).
+create materialized view mv_cancellation_stages as
+select
+  o.store_id,
+  fs.code as cancelled_from_stage,
+  count(*) as cancel_count
+from orders o
+join order_statuses s on s.id = o.status_id
+join order_status_events e on e.order_id = o.id
+join order_statuses ts on ts.id = e.to_status_id and ts.code = 'cancelled'
+left join order_statuses fs on fs.id = e.from_status_id
+where s.is_cancelled
+group by o.store_id, fs.code;
+
 -- One call to refresh them all (schedule via pg_cron / Supabase cron).
 create or replace function refresh_reporting() returns void as $$
 begin
@@ -453,6 +624,9 @@ begin
   refresh materialized view mv_product_sales;
   refresh materialized view mv_payment_mix;
   refresh materialized view mv_table_turnover;
+  refresh materialized view mv_item_prep_stats;
+  refresh materialized view mv_cancellation_items;
+  refresh materialized view mv_cancellation_stages;
 end;
 $$ language plpgsql;
 
@@ -511,10 +685,17 @@ alter table orders                  enable row level security;
 alter table order_items             enable row level security;
 alter table order_item_selections   enable row level security;
 alter table payments                enable row level security;
-alter table order_status_events     enable row level security;
-alter table order_feedback          enable row level security;
+alter table order_status_events      enable row level security;
+alter table order_feedback           enable row level security;
+alter table order_item_statuses      enable row level security;
+alter table order_item_status_events enable row level security;
+alter table menu_availability        enable row level security;
+alter table ai_briefings             enable row level security;
+alter table ai_chat_threads          enable row level security;
+alter table ai_chat_messages         enable row level security;
 
 -- Views aren't covered by RLS — revoke them from the public API roles too.
 revoke all on mv_order_item_facts, mv_daily_sales, mv_product_sales,
-              mv_payment_mix, mv_table_turnover
+              mv_payment_mix, mv_table_turnover,
+              mv_item_prep_stats, mv_cancellation_items, mv_cancellation_stages
   from anon, authenticated;

@@ -1,0 +1,23 @@
+{
+  "_note": "Suggestion Bhayya rules config. Loaded at runtime — edit and reload, no rebuild.",
+  "lookback_days": {
+    "pairing": 30,
+    "hour_bucket": 14,
+    "attach_rate": 30
+  },
+  "min_attach_rate": 0.25,
+  "min_orders_for_suggestions": 2,
+  "max_suggestions": 2,
+  "hour_buckets": {
+    "morning": [[10, 11]],
+    "lunch": [[11, 15]],
+    "evening": [[17, 21]],
+    "late": [[21, 23]]
+  },
+  "rules_enabled": {
+    "pairing": true,
+    "hour_bucket": true,
+    "attach_rate": true,
+    "bulk_discount": true
+  }
+}

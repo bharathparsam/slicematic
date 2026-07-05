@@ -1,6 +1,15 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { formatCurrency } from '@/lib/billing'
+import {
+  DEFAULT_SUGGESTION_CONFIG,
+  dismissSuggestion,
+  getSuggestions,
+  loadSuggestionConfig,
+  mergeSuggestions,
+  suggestionKey,
+} from '@/lib/suggestionStore'
 import BottomSheet, { SheetHeader, SheetFooter, SectionLabel } from './BottomSheet'
+import SuggestionBhayya from './SuggestionBhayya'
 import { C, FONT_DISPLAY } from './theme'
 
 /**
@@ -9,10 +18,33 @@ import { C, FONT_DISPLAY } from './theme'
  * to the cart. All items + prices come from the loaded menu — nothing hardcoded.
  * The live "Add to cart" price is the pre-tax line total (unit × qty).
  */
-export default function CustomizeSheet({ open, pizza, bases, toppings, taxConfig, onClose, onAdd }) {
+export default function CustomizeSheet({
+  open,
+  pizza,
+  bases,
+  toppings,
+  pizzas = [],
+  soldOutBases,
+  soldOutToppings,
+  soldOutPizzas,
+  taxConfig,
+  cartTotalQty = 0,
+  onClose,
+  onAdd,
+  onApplyPizza,
+}) {
   const [baseId, setBaseId] = useState(null)
   const [toppingIds, setToppingIds] = useState([])
   const [qty, setQty] = useState(1)
+  const [suggestionConfig, setSuggestionConfig] = useState(null)
+  const [apiSuggestions, setApiSuggestions] = useState([])
+  const [suggestionsLoading, setSuggestionsLoading] = useState(false)
+  const [dismissTick, setDismissTick] = useState(0)
+  const debounceRef = useRef(null)
+
+  useEffect(() => {
+    loadSuggestionConfig().then(setSuggestionConfig)
+  }, [])
 
   // Reset the builder whenever a different pizza is opened.
   useEffect(() => {
@@ -20,8 +52,34 @@ export default function CustomizeSheet({ open, pizza, bases, toppings, taxConfig
       setBaseId(null)
       setToppingIds([])
       setQty(1)
+      setApiSuggestions([])
     }
   }, [open, pizza?.id])
+
+  // Fetch suggestions when base is picked (debounced ~300ms).
+  useEffect(() => {
+    if (!open || !baseId || !pizza?.id) {
+      setApiSuggestions([])
+      return undefined
+    }
+
+    if (debounceRef.current) clearTimeout(debounceRef.current)
+    debounceRef.current = setTimeout(async () => {
+      setSuggestionsLoading(true)
+      const data = await getSuggestions({
+        pizzaId: pizza.id,
+        pizzaName: pizza.name,
+        toppingIds,
+        cartQty: cartTotalQty,
+      })
+      setApiSuggestions(data.suggestions ?? [])
+      setSuggestionsLoading(false)
+    }, 300)
+
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current)
+    }
+  }, [open, baseId, pizza?.id, pizza?.name, toppingIds, cartTotalQty])
 
   if (!pizza) return null
 
@@ -34,8 +92,37 @@ export default function CustomizeSheet({ open, pizza, bases, toppings, taxConfig
   const discPct = Math.round((taxConfig?.discount?.rate ?? 0.1) * 100)
   const minQty = taxConfig?.discount?.minQuantity ?? 5
 
+  const suggestions = mergeSuggestions(apiSuggestions, {
+    cartTotalQty,
+    lineQty: qty,
+    taxConfig,
+    config: suggestionConfig ?? DEFAULT_SUGGESTION_CONFIG,
+    soldOutToppings,
+    soldOutPizzas,
+    currentPizzaId: pizza?.id,
+    selectedToppingIds: toppingIds,
+    toppings,
+    pizzas,
+  })
+  void dismissTick
+
   function toggleTopping(id) {
     setToppingIds((ids) => (ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id]))
+  }
+
+  function handleDismiss(suggestion) {
+    dismissSuggestion(suggestionKey(suggestion))
+    setDismissTick((n) => n + 1)
+  }
+
+  function applyTopping(itemId) {
+    if (soldOutToppings?.has?.(itemId)) return
+    if (!toppingIds.includes(itemId)) toggleTopping(itemId)
+  }
+
+  function applyPizza(itemId) {
+    if (soldOutPizzas?.has?.(itemId)) return
+    onApplyPizza?.(itemId)
   }
 
   function handleAdd() {
@@ -61,25 +148,48 @@ export default function CustomizeSheet({ open, pizza, bases, toppings, taxConfig
         <SectionLabel extra={<span style={{ color: C.red }}> *</span>}>Pick a base</SectionLabel>
         <div className="grid grid-cols-2 gap-2.5">
           {bases.map((b) => {
-            const sel = baseId === b.id
+            const isSold = !!soldOutBases?.has?.(b.id)
+            const sel = baseId === b.id && !isSold
             return (
               <button
                 key={b.id}
                 type="button"
-                onClick={() => setBaseId(b.id)}
+                onClick={() => !isSold && setBaseId(b.id)}
+                disabled={isSold}
+                aria-disabled={isSold || undefined}
                 aria-pressed={sel}
                 className="flex w-full items-center justify-between gap-1.5 rounded-[13px] px-3 py-3 transition-colors"
-                style={tileStyle(sel)}
+                style={tileStyle(sel, isSold)}
               >
                 <span style={{ fontSize: 14, fontWeight: 700 }}>{b.name}</span>
-                <span style={{ fontSize: 13, fontWeight: 700, color: sel ? C.red : C.brown2 }}>
-                  {formatCurrency(b.price)}
+                <span
+                  style={{
+                    fontSize: isSold ? 11 : 13,
+                    fontWeight: 700,
+                    textTransform: isSold ? 'uppercase' : 'none',
+                    letterSpacing: isSold ? '0.06em' : 0,
+                    color: isSold ? C.red : sel ? C.red : C.brown2,
+                  }}
+                >
+                  {isSold ? 'Sold out' : formatCurrency(b.price)}
                 </span>
               </button>
             )
           })}
         </div>
       </div>
+
+      {canAdd && (
+        <SuggestionBhayya
+          variant="sheet"
+          suggestions={suggestions}
+          loading={suggestionsLoading}
+          showEmptyState={!suggestionsLoading && apiSuggestions.length === 0 && !!baseId}
+          onApplyTopping={applyTopping}
+          onApplyPizza={applyPizza}
+          onDismiss={handleDismiss}
+        />
+      )}
 
       {/* Toppings — optional */}
       {toppings.length > 0 && (
@@ -96,15 +206,18 @@ export default function CustomizeSheet({ open, pizza, bases, toppings, taxConfig
           </SectionLabel>
           <div className="grid grid-cols-2 gap-2.5">
             {toppings.map((t) => {
-              const sel = toppingIds.includes(t.id)
+              const isSold = !!soldOutToppings?.has?.(t.id)
+              const sel = toppingIds.includes(t.id) && !isSold
               return (
                 <button
                   key={t.id}
                   type="button"
-                  onClick={() => toggleTopping(t.id)}
+                  onClick={() => !isSold && toggleTopping(t.id)}
+                  disabled={isSold}
+                  aria-disabled={isSold || undefined}
                   aria-pressed={sel}
                   className="flex w-full items-center justify-between gap-1.5 rounded-[13px] px-3 py-3 transition-colors"
-                  style={tileStyle(sel)}
+                  style={tileStyle(sel, isSold)}
                 >
                   <span className="flex items-center gap-2">
                     <span className="flex flex-none items-center justify-center rounded-md" style={checkboxStyle(sel)}>
@@ -114,8 +227,16 @@ export default function CustomizeSheet({ open, pizza, bases, toppings, taxConfig
                       {t.name}
                     </span>
                   </span>
-                  <span style={{ fontSize: 12.5, fontWeight: 700, color: C.brown2 }}>
-                    +{formatCurrency(t.price)}
+                  <span
+                    style={{
+                      fontSize: isSold ? 11 : 12.5,
+                      fontWeight: 700,
+                      textTransform: isSold ? 'uppercase' : 'none',
+                      letterSpacing: isSold ? '0.06em' : 0,
+                      color: isSold ? C.red : C.brown2,
+                    }}
+                  >
+                    {isSold ? 'Sold out' : `+${formatCurrency(t.price)}`}
                   </span>
                 </button>
               )
@@ -193,7 +314,16 @@ export function Stepper({ qty, onDec, onInc, size = 'lg' }) {
   )
 }
 
-function tileStyle(selected) {
+function tileStyle(selected, soldOut = false) {
+  if (soldOut) {
+    return {
+      background: C.disabledBg,
+      border: `1.5px dashed ${C.border2}`,
+      fontFamily: 'inherit',
+      opacity: 0.6,
+      cursor: 'not-allowed',
+    }
+  }
   return selected
     ? { background: C.goldBg, border: `2px solid ${C.red}`, fontFamily: 'inherit' }
     : { background: C.tileBg, border: `1.5px solid ${C.border3}`, fontFamily: 'inherit' }
