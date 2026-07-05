@@ -1,9 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 import { motion, AnimatePresence, useReducedMotion } from 'framer-motion'
 import AdminAnalytics from '@/components/AdminAnalytics'
-import AdminChat from '@/components/AdminChat'
 import AdminMenu from '@/components/AdminMenu'
+import AdminStaff from '@/components/AdminStaff'
+import ViewNav from '@/components/ViewNav'
+import { kitchenProgressLabel } from '@/lib/analyticsFormat'
 import { getAllOrders, completeOrder, cancelOrder } from '@/lib/orderStore'
+import { normOrderStatus, summariseOrderItems } from '@/lib/orderDisplay'
 import { formatCurrency } from '@/lib/billing'
 import { signIn, signOut, isSupabaseConfigured } from '@/lib/auth'
 import { C, FONT_DISPLAY, FONT_MONO } from '@/components/order/theme'
@@ -20,7 +23,7 @@ const FILTERS = [
 // The last track fits the Complete · Modify · Cancel actions on one row.
 const GRID = '96px 100px 72px 1.3fr 1.8fr 48px 108px 66px 232px'
 
-export default function AdminOrdersTable({ onModify, onExit, session, authReady }) {
+export default function AdminOrdersTable({ onModify, onExit, onKitchen, onManager, session, authReady }) {
   const [orders, setOrders] = useState([])
   const [loading, setLoading] = useState(false)
   const [loadError, setLoadError] = useState('')
@@ -96,11 +99,11 @@ export default function AdminOrdersTable({ onModify, onExit, session, authReady 
     }
   }
 
-  const activeCount = orders.filter((o) => normStatus(o.status) === 'active').length
-  const filtered = filter === 'all' ? orders : orders.filter((o) => normStatus(o.status) === filter)
+  const activeCount = orders.filter((o) => normOrderStatus(o.status) === 'active').length
+  const filtered = filter === 'all' ? orders : orders.filter((o) => normOrderStatus(o.status) === filter)
 
   // "Today so far" — non-cancelled orders placed today (client-derived, no new API).
-  const todays = orders.filter((o) => normStatus(o.status) !== 'cancelled' && isToday(o.timestamp))
+  const todays = orders.filter((o) => normOrderStatus(o.status) !== 'cancelled' && isToday(o.timestamp))
   const todaySalesN = todays.reduce((s, o) => s + Number(o.total || 0), 0)
   const todayAvgN = todays.length ? todaySalesN / todays.length : 0
 
@@ -125,7 +128,14 @@ export default function AdminOrdersTable({ onModify, onExit, session, authReady 
           onConfirm={confirmCancel}
         />
 
-        <TopBar onExit={onExit} authed={unlocked} email={session?.user?.email} onSignOut={signOut} />
+        <TopBar
+          onExit={onExit}
+          onKitchen={onKitchen}
+          onManager={onManager}
+          authed={unlocked}
+          email={session?.user?.email}
+          onSignOut={signOut}
+        />
 
         {!unlocked ? (
           !authReady ? <AuthChecking /> : <LoginCard />
@@ -142,10 +152,10 @@ export default function AdminOrdersTable({ onModify, onExit, session, authReady 
 
             {section === 'analytics' ? (
               <AdminAnalytics />
-            ) : section === 'chat' ? (
-              <AdminChat />
             ) : section === 'menu' ? (
               <AdminMenu />
+            ) : section === 'staff' ? (
+              <AdminStaff />
             ) : (
               <OrdersPanel
                 orders={filtered}
@@ -172,55 +182,39 @@ export default function AdminOrdersTable({ onModify, onExit, session, authReady 
 
 /* -------------------------------- shell --------------------------------- */
 
-function TopBar({ onExit, authed, email, onSignOut }) {
+function TopBar({ onExit, onKitchen, onManager, authed, email, onSignOut }) {
   return (
     <header
-      className="sticky top-0 z-30 flex items-center justify-between gap-3 px-6 py-4 sm:px-8"
+      className="sticky top-0 z-30 flex flex-wrap items-center justify-between gap-x-3 gap-y-2 px-4 py-4 sm:px-8"
       style={{ background: C.ink, color: C.cream }}
     >
-      <div className="flex items-center gap-3">
+      <div className="flex min-w-0 shrink-0 items-center gap-3">
         <div
           className="flex h-[42px] w-[42px] items-center justify-center rounded-xl"
           style={{ background: C.red, boxShadow: '0 6px 16px rgba(197,52,28,0.4)' }}
         >
           <span style={{ fontFamily: FONT_DISPLAY, color: C.cream, fontSize: 23, lineHeight: 1 }}>S</span>
         </div>
-        <div style={{ lineHeight: 1.15 }}>
+        <div className="min-w-0" style={{ lineHeight: 1.15 }}>
           <div style={{ fontFamily: FONT_DISPLAY, fontSize: 21 }}>SliceMatic</div>
           <div className="uppercase" style={{ fontSize: 10.5, letterSpacing: '0.16em', color: '#c8a883', fontWeight: 600 }}>
             Hello Rajan!
           </div>
         </div>
       </div>
-      <div className="flex items-center gap-3 sm:gap-4">
-        {/* <div className="hidden items-center gap-2 sm:flex" style={{ fontSize: 13, color: '#d9c6a6', fontWeight: 600 }}>
-          <span
-            className="h-2 w-2 rounded-full"
-            style={{ background: '#5ec26b', boxShadow: '0 0 0 4px rgba(94,194,107,0.2)' }}
-          />
-          Live · Asia/Kolkata
-        </div> */}
-        <div className="flex rounded-full p-1" style={{ background: '#3a2418' }}>
-          <button
-            type="button"
-            onClick={onExit}
-            className="rounded-full px-4 py-2 font-semibold"
-            style={{ fontSize: 13.5, color: '#c8a883' }}
-          >
-            Order
-          </button>
-          <span
-            className="rounded-full px-4 py-2 font-bold"
-            style={{ fontSize: 13.5, background: C.cream, color: C.ink }}
-          >
-            Admin
-          </span>
-        </div>
+      <div className="flex min-w-0 flex-wrap items-center justify-end gap-2 sm:gap-3">
+        <ViewNav
+          active="admin"
+          variant="dark"
+          onOrder={onExit}
+          onKitchen={onKitchen}
+          onManager={onManager}
+        />
         {authed && (
-          <div className="flex items-center gap-2.5">
+          <div className="flex items-center gap-2">
             {email && (
               <span
-                className="hidden max-w-[180px] truncate lg:inline"
+                className="hidden max-w-[140px] truncate lg:inline"
                 title={email}
                 style={{ fontSize: 12.5, color: '#c8a883', fontWeight: 600 }}
               >
@@ -230,8 +224,8 @@ function TopBar({ onExit, authed, email, onSignOut }) {
             <button
               type="button"
               onClick={onSignOut}
-              className="rounded-full px-3.5 py-2 font-semibold transition-colors hover:opacity-80"
-              style={{ fontSize: 13, background: '#3a2418', color: '#e8caae' }}
+              className="rounded-full px-3 py-1.5 font-semibold transition-colors hover:opacity-80 sm:px-3.5 sm:py-2"
+              style={{ fontSize: 12, background: '#3a2418', color: '#e8caae' }}
             >
               Sign out
             </button>
@@ -246,8 +240,8 @@ function Sidebar({ section, setSection, activeCount, todaySales, todayOrders, to
   const items = [
     { key: 'orders', icon: '📋', label: 'Orders', badge: activeCount || '' },
     { key: 'menu', icon: '🍕', label: 'Alter Menu', badge: '' },
+    { key: 'staff', icon: '👥', label: 'Staff', badge: '' },
     { key: 'analytics', icon: '📊', label: 'Analytics', badge: '' },
-    { key: 'chat', icon: '🤖', label: 'Ask COO', badge: '' },
   ]
   return (
     <aside
@@ -463,6 +457,7 @@ function OrdersPanel({
           <div className="mt-1.5" style={{ fontSize: 13.5, color: C.brown2, fontWeight: 600 }}>
             {orders.length} {orders.length === 1 ? 'order' : 'orders'} · most recent first ·{' '}
             <span style={{ color: C.red }}>{activeCount} active</span>
+            {activeCount > 0 && ' · complete or cancel to free tables'}
           </div>
         </div>
         <div className="flex items-center gap-2.5">
@@ -538,11 +533,11 @@ function OrdersPanel({
               <PizzaLoader variant="inline" />
             ) : orders.length === 0 ? (
               <p className="py-10 text-center" style={{ fontSize: 14, color: C.brown2 }}>
-                {totalCount === 0 ? 'No orders yet. Place one from the Order tab.' : 'No orders match this filter.'}
+                {totalCount === 0 ? 'No orders yet. Place one from Orders.' : 'No orders match this filter.'}
               </p>
             ) : (
               orders.map((o) => {
-                const status = normStatus(o.status)
+                const status = normOrderStatus(o.status)
                 const cancelled = status === 'cancelled'
                 const active = status === 'active'
                 return (
@@ -556,6 +551,11 @@ function OrdersPanel({
                     </div>
                     <div>
                       <StatusBadge status={status} />
+                      {active && (
+                        <div style={{ fontSize: 11, color: C.brown2, fontWeight: 600, marginTop: 4 }}>
+                          {kitchenProgressLabel(o.items) || 'Queued'}
+                        </div>
+                      )}
                     </div>
                     <div style={{ fontWeight: 700, fontSize: 14, color: o.table ? C.ink : '#c0ab8c' }}>
                       {o.table || '—'}
@@ -566,7 +566,7 @@ function OrdersPanel({
                       </div>
                       <div style={{ fontFamily: FONT_MONO, fontSize: 11.5, color: '#a0876a' }}>{o.phone}</div>
                     </div>
-                    <div style={{ fontSize: 13, color: C.brown, lineHeight: 1.4 }}>{summariseItems(o)}</div>
+                    <div style={{ fontSize: 13, color: C.brown, lineHeight: 1.4 }}>{summariseOrderItems(o)}</div>
                     <div className="text-right tabular-nums" style={{ fontWeight: 700, fontSize: 14, color: C.ink }}>
                       {o.quantity}
                     </div>
@@ -726,7 +726,7 @@ function AdminConfirmModal({ order, tone, busy, onCancel, onConfirm }) {
                 {complete && <Detail label="Payment" value={order.paymentMode || '—'} />}
                 <div className="col-span-2">
                   <dt style={{ color: C.brown2 }}>Items</dt>
-                  <dd style={{ fontWeight: 600 }}>{summariseItems(order)}</dd>
+                  <dd style={{ fontWeight: 600 }}>{summariseOrderItems(order)}</dd>
                 </div>
               </dl>
 
@@ -800,28 +800,8 @@ function Detail({ label, value, mono }) {
 
 /* -------------------------------- helpers ------------------------------- */
 
-function normStatus(status) {
-  return status === 'completed' || status === 'cancelled' ? status : 'active'
-}
-
 function isToday(iso) {
   const d = new Date(iso)
   if (isNaN(d.getTime())) return false
   return d.toDateString() === new Date().toDateString()
-}
-
-/** Short human summary of an order's pizzas, defensive against partial records. */
-function summariseItems(o) {
-  if (Array.isArray(o.items) && o.items.length > 0) {
-    return o.items
-      .map((it) => {
-        const name = it.pizza?.name ?? '—'
-        return it.quantity > 1 ? `${name} ×${it.quantity}` : name
-      })
-      .join(', ')
-  }
-  const parts = []
-  if (o.base?.name) parts.push(o.base.name)
-  if (o.pizza?.name) parts.push(o.pizza.name)
-  return parts.join(' · ') || '—'
 }

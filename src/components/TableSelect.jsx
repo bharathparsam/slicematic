@@ -1,6 +1,9 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { motion, AnimatePresence, useReducedMotion } from 'framer-motion'
 import { formatCurrency } from '@/lib/billing'
+import { loadOpsConfig, DEFAULT_OPS_CONFIG } from '@/lib/opsConfig'
+import ViewNav from '@/components/ViewNav'
+import StoreHoursBadge from '@/components/StoreHoursBadge'
 
 /**
  * Landing / "select your table" — the app's home screen (the order flow's table
@@ -76,12 +79,6 @@ function shortName(name, label) {
   return name.startsWith(prefix) ? name.slice(prefix.length) : name
 }
 
-/** Store hours — mirrors the footer copy (11am–11pm). */
-function isOpenNow() {
-  const h = new Date().getHours()
-  return h >= 11 && h < 23
-}
-
 export default function TableSelect({
   tables,
   label = 'Table',
@@ -91,15 +88,21 @@ export default function TableSelect({
   onSelect,
   onStart,
   onAdmin,
+  onKitchen,
+  onManager,
 }) {
   const occupiedSet = new Set(occupied)
   const [wrongTable, setWrongTable] = useState('')
+  const [opsConfig, setOpsConfig] = useState(DEFAULT_OPS_CONFIG)
   const reduce = useReducedMotion()
+
+  useEffect(() => {
+    loadOpsConfig().then(setOpsConfig)
+  }, [])
 
   const freeCount = tables.filter((t) => !occupiedSet.has(t)).length
   const pizzaCount = menu?.pizzas?.length ?? 0
   const featured = (menu?.pizzas ?? []).slice(0, 3)
-  const open = isOpenNow()
 
   function handleTap(name) {
     if (occupiedSet.has(name)) {
@@ -133,14 +136,14 @@ export default function TableSelect({
     >
       {/* TOP BAR */}
       <div
-        className="sticky top-0 z-40 flex items-center justify-between rounded-t-3xl px-5 py-3.5"
+        className="sticky top-0 z-40 flex flex-wrap items-center justify-between gap-2 rounded-t-3xl px-4 py-3 sm:px-5 sm:py-3.5"
         style={{
           background: 'rgba(251,245,234,0.92)',
           backdropFilter: 'blur(8px)',
           borderBottom: `1px solid ${C.border}`,
         }}
       >
-        <div className="flex items-center gap-2.5">
+        <div className="flex min-w-0 shrink-0 items-center gap-2.5">
           <div
             className="flex h-9 w-9 items-center justify-center rounded-xl"
             style={{ background: C.red, boxShadow: '0 4px 12px rgba(197,52,28,0.28)' }}
@@ -149,7 +152,7 @@ export default function TableSelect({
               S
             </span>
           </div>
-          <div className="leading-tight">
+          <div className="min-w-0 leading-tight">
             <div style={{ fontFamily: FONT_DISPLAY, fontSize: 18, color: C.ink }}>SliceMatic</div>
             <div
               className="font-semibold uppercase"
@@ -160,31 +163,17 @@ export default function TableSelect({
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
-          {onAdmin && (
-            <button
-              type="button"
-              onClick={onAdmin}
-              className="rounded-full px-2.5 py-1 text-xs font-semibold transition-colors hover:opacity-80"
-              style={{ color: C.brown2 }}
-            >
-              Admin
-            </button>
-          )}
-          <div
-            className="flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-bold"
-            style={
-              open
-                ? { background: C.greenBg, color: C.greenDark }
-                : { background: '#f0e5d2', color: C.brown2 }
-            }
-          >
-            <span
-              className="inline-block h-[7px] w-[7px] rounded-full"
-              style={{ background: open ? C.green : C.brown3 }}
-            />
-            {open ? 'Open' : 'Closed'}
-          </div>
+        <div className="flex min-w-0 flex-1 flex-wrap items-center justify-end gap-1.5 sm:gap-2">
+          <ViewNav
+            active="order"
+            onKitchen={onKitchen}
+            onManager={onManager}
+            onAdmin={onAdmin}
+          />
+          <StoreHoursBadge
+            openHour={opsConfig.store_open_hour}
+            closeHour={opsConfig.store_close_hour}
+          />
         </div>
       </div>
 

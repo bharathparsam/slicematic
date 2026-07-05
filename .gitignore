@@ -15,3 +15,9 @@ backend/**/__pycache__
 
 # Never commit real env files (templates like .env.example are fine)
 .env
+
+# Local IDE / tooling (machine-specific paths)
+.cursor/
+
+# Script bytecode
+scripts/__pycache__/

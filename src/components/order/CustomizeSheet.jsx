@@ -1,6 +1,15 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { formatCurrency } from '@/lib/billing'
+import {
+  DEFAULT_SUGGESTION_CONFIG,
+  dismissSuggestion,
+  getSuggestions,
+  loadSuggestionConfig,
+  mergeSuggestions,
+  suggestionKey,
+} from '@/lib/suggestionStore'
 import BottomSheet, { SheetHeader, SheetFooter, SectionLabel } from './BottomSheet'
+import SuggestionBhayya from './SuggestionBhayya'
 import { C, FONT_DISPLAY } from './theme'
 
 /**
@@ -14,15 +23,28 @@ export default function CustomizeSheet({
   pizza,
   bases,
   toppings,
+  pizzas = [],
   soldOutBases,
   soldOutToppings,
+  soldOutPizzas,
   taxConfig,
+  cartTotalQty = 0,
   onClose,
   onAdd,
+  onApplyPizza,
 }) {
   const [baseId, setBaseId] = useState(null)
   const [toppingIds, setToppingIds] = useState([])
   const [qty, setQty] = useState(1)
+  const [suggestionConfig, setSuggestionConfig] = useState(null)
+  const [apiSuggestions, setApiSuggestions] = useState([])
+  const [suggestionsLoading, setSuggestionsLoading] = useState(false)
+  const [dismissTick, setDismissTick] = useState(0)
+  const debounceRef = useRef(null)
+
+  useEffect(() => {
+    loadSuggestionConfig().then(setSuggestionConfig)
+  }, [])
 
   // Reset the builder whenever a different pizza is opened.
   useEffect(() => {
@@ -30,8 +52,34 @@ export default function CustomizeSheet({
       setBaseId(null)
       setToppingIds([])
       setQty(1)
+      setApiSuggestions([])
     }
   }, [open, pizza?.id])
+
+  // Fetch suggestions when base is picked (debounced ~300ms).
+  useEffect(() => {
+    if (!open || !baseId || !pizza?.id) {
+      setApiSuggestions([])
+      return undefined
+    }
+
+    if (debounceRef.current) clearTimeout(debounceRef.current)
+    debounceRef.current = setTimeout(async () => {
+      setSuggestionsLoading(true)
+      const data = await getSuggestions({
+        pizzaId: pizza.id,
+        pizzaName: pizza.name,
+        toppingIds,
+        cartQty: cartTotalQty,
+      })
+      setApiSuggestions(data.suggestions ?? [])
+      setSuggestionsLoading(false)
+    }, 300)
+
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current)
+    }
+  }, [open, baseId, pizza?.id, pizza?.name, toppingIds, cartTotalQty])
 
   if (!pizza) return null
 
@@ -44,8 +92,37 @@ export default function CustomizeSheet({
   const discPct = Math.round((taxConfig?.discount?.rate ?? 0.1) * 100)
   const minQty = taxConfig?.discount?.minQuantity ?? 5
 
+  const suggestions = mergeSuggestions(apiSuggestions, {
+    cartTotalQty,
+    lineQty: qty,
+    taxConfig,
+    config: suggestionConfig ?? DEFAULT_SUGGESTION_CONFIG,
+    soldOutToppings,
+    soldOutPizzas,
+    currentPizzaId: pizza?.id,
+    selectedToppingIds: toppingIds,
+    toppings,
+    pizzas,
+  })
+  void dismissTick
+
   function toggleTopping(id) {
     setToppingIds((ids) => (ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id]))
+  }
+
+  function handleDismiss(suggestion) {
+    dismissSuggestion(suggestionKey(suggestion))
+    setDismissTick((n) => n + 1)
+  }
+
+  function applyTopping(itemId) {
+    if (soldOutToppings?.has?.(itemId)) return
+    if (!toppingIds.includes(itemId)) toggleTopping(itemId)
+  }
+
+  function applyPizza(itemId) {
+    if (soldOutPizzas?.has?.(itemId)) return
+    onApplyPizza?.(itemId)
   }
 
   function handleAdd() {
@@ -101,6 +178,18 @@ export default function CustomizeSheet({
           })}
         </div>
       </div>
+
+      {canAdd && (
+        <SuggestionBhayya
+          variant="sheet"
+          suggestions={suggestions}
+          loading={suggestionsLoading}
+          showEmptyState={!suggestionsLoading && apiSuggestions.length === 0 && !!baseId}
+          onApplyTopping={applyTopping}
+          onApplyPizza={applyPizza}
+          onDismiss={handleDismiss}
+        />
+      )}
 
       {/* Toppings — optional */}
       {toppings.length > 0 && (

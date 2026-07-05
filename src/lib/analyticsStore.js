@@ -50,6 +50,16 @@ export async function getSalesDaily(days = 7) {
   }
 }
 
+/** Ops-first analytics summary (4 categories). */
+export async function getAnalyticsSummary(days = 7) {
+  try {
+    return await apiFetch(`/api/analytics/summary?days=${days}`)
+  } catch (err) {
+    console.warn('[analyticsStore] could not fetch summary', err)
+    return null
+  }
+}
+
 /**
  * Day-wise sales (orders/gross/discount/net) for a custom inclusive date range.
  * Dates are IST business dates as 'YYYY-MM-DD'. Self-defaults to [] on error.
@@ -74,3 +84,4 @@ export async function getPaymentMix(days = 7) {
     return []
   }
 }
+
