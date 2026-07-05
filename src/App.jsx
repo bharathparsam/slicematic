@@ -4,6 +4,8 @@ import TableSelect from '@/components/TableSelect'
 import OrderScreen from '@/components/order/OrderScreen'
 import DoneScreen from '@/components/order/DoneScreen'
 import PizzaLoader from '@/components/order/PizzaLoader'
+import EmployeeBoard from '@/components/EmployeeBoard'
+import ManagerBoard from '@/components/ManagerBoard'
 import AdminOrdersTable from '@/components/AdminOrdersTable'
 import { Button } from '@/components/ui/primitives'
 import { loadAllMenus } from '@/lib/menuLoader'
@@ -17,7 +19,7 @@ import { getAllSoldOut } from '@/lib/menuStore'
 import { getSession, onAuthChange } from '@/lib/auth'
 
 export default function App() {
-  const [view, setView] = useState('order') // 'order' | 'admin'
+  const [view, setView] = useState('order') // 'order' | 'kitchen' | 'manager' | 'admin'
   // A saved order pulled in from Admin for full editing (null = new order).
   const [editingOrder, setEditingOrder] = useState(null)
   // Admin auth session (Supabase). Owned here so a signed-in admin survives the
@@ -62,11 +64,27 @@ export default function App() {
           editingOrder={editingOrder}
           onDoneEditing={doneEditing}
           onAdmin={() => goToView('admin')}
+          onKitchen={() => goToView('kitchen')}
+          onManager={() => goToView('manager')}
+        />
+      ) : view === 'kitchen' ? (
+        <EmployeeBoard
+          onOrder={() => goToView('order')}
+          onManager={() => goToView('manager')}
+          onAdmin={() => goToView('admin')}
+        />
+      ) : view === 'manager' ? (
+        <ManagerBoard
+          onOrder={() => goToView('order')}
+          onKitchen={() => goToView('kitchen')}
+          onAdmin={() => goToView('admin')}
         />
       ) : (
         <AdminOrdersTable
           onModify={startModify}
           onExit={() => goToView('order')}
+          onKitchen={() => goToView('kitchen')}
+          onManager={() => goToView('manager')}
           session={session}
           authReady={authReady}
         />
@@ -118,7 +136,7 @@ function resolveCartFromOrder(order, menu) {
   }))
 }
 
-function OrderFlow({ editingOrder = null, onDoneEditing, onAdmin }) {
+function OrderFlow({ editingOrder = null, onDoneEditing, onAdmin, onKitchen, onManager }) {
   const isEditing = !!editingOrder
 
   // --- Load state (menu required; tax + tables self-default) ----------
@@ -419,6 +437,8 @@ function OrderFlow({ editingOrder = null, onDoneEditing, onAdmin }) {
             onSelect={setTable}
             onStart={() => setStage('order')}
             onAdmin={onAdmin}
+            onKitchen={onKitchen}
+            onManager={onManager}
           />
         </motion.div>
       </AnimatePresence>
@@ -454,6 +474,8 @@ function OrderFlow({ editingOrder = null, onDoneEditing, onAdmin }) {
       onConfirm={handleConfirmOrder}
       onChangeTable={goToTableStage}
       onAdmin={onAdmin}
+      onKitchen={onKitchen}
+      onManager={onManager}
       onDiscardEdit={onDoneEditing}
     />
   )

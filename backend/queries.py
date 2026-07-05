@@ -39,6 +39,35 @@ def get_status_id(cur, code: str) -> int:
     return row['id']
 
 
+def get_item_status_id(cur, code: str) -> int:
+    cur.execute('SELECT id FROM order_item_statuses WHERE code = %s', (code,))
+    row = cur.fetchone()
+    if not row:
+        raise RuntimeError(
+            f"Missing item status '{code}' — run sql/schema.sql first"
+        )
+    return row['id']
+
+
+def log_item_status_event(
+    cur,
+    order_item_id: int,
+    from_status_id: int | None,
+    to_status_id: int,
+    actor_staff_id: int | None = None,
+    reason: str | None = None,
+) -> None:
+    cur.execute(
+        '''
+        INSERT INTO order_item_status_events (
+          order_item_id, from_status_id, to_status_id, actor_staff_id, reason
+        )
+        VALUES (%s, %s, %s, %s, %s)
+        ''',
+        (order_item_id, from_status_id, to_status_id, actor_staff_id, reason),
+    )
+
+
 def upsert_user(cur, phone: str, full_name: str) -> int:
     cur.execute(
         '''
@@ -330,10 +359,42 @@ def cancel_order(order_public_id: str, reason: str | None = None) -> dict:
 
         cancelled_status_id = get_status_id(cur, 'cancelled')
         cur.execute(
-            'UPDATE orders SET status_id = %s, cancelled_at = now(), cancel_reason = %s '
-            'WHERE id = %s',
-            (cancelled_status_id, reason, row['id']),
+            '''
+            UPDATE orders SET
+              status_id = %s,
+              cancelled_at = now(),
+              cancel_reason = %s,
+              cancelled_from_status_id = %s
+            WHERE id = %s
+            ''',
+            (cancelled_status_id, reason, row['status_id'], row['id']),
         )
+        # Void open kitchen items on cancel.
+        try:
+            cancelled_item_status_id = get_item_status_id(cur, 'cancelled')
+            cur.execute(
+                '''
+                SELECT oi.id, oi.status_id
+                FROM order_items oi
+                JOIN order_item_statuses ois ON ois.id = oi.status_id
+                WHERE oi.order_id = %s AND ois.code NOT IN ('served', 'cancelled')
+                ''',
+                (row['id'],),
+            )
+            for item_row in cur.fetchall():
+                cur.execute(
+                    'UPDATE order_items SET status_id = %s WHERE id = %s',
+                    (cancelled_item_status_id, item_row['id']),
+                )
+                log_item_status_event(
+                    cur,
+                    item_row['id'],
+                    item_row['status_id'],
+                    cancelled_item_status_id,
+                    reason=reason,
+                )
+        except RuntimeError:
+            pass
         cur.execute(
             '''
             INSERT INTO order_status_events (order_id, from_status_id, to_status_id, reason)
@@ -508,6 +569,7 @@ def _compute_totals(items) -> dict:
 
 def _insert_order_lines(cur, store_id: int, order_id: int, items) -> None:
     """Insert order_items + their base/pizza/topping selections."""
+    queued_status_id = get_item_status_id(cur, 'queued')
     for line_no, item in enumerate(items, start=1):
         line_taxable = round2(item.price_wo_gst * item.quantity)
         line_discount = round2(item.line_discount)
@@ -520,15 +582,18 @@ def _insert_order_lines(cur, store_id: int, order_id: int, items) -> None:
             '''
             INSERT INTO order_items (
               order_id, line_no, quantity, unit_price,
-              line_subtotal, line_discount, line_tax, line_total
+              line_subtotal, line_discount, line_tax, line_total,
+              status_id, queued_at
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, now())
             RETURNING id
             ''',
             (order_id, line_no, item.quantity, unit_price,
-             line_subtotal, line_discount, line_tax, line_total),
+             line_subtotal, line_discount, line_tax, line_total,
+             queued_status_id),
         )
         order_item_id = cur.fetchone()['id']
+        log_item_status_event(cur, order_item_id, None, queued_status_id)
 
         selections = [
             ('base', item.base, Decimal('0')),
@@ -711,12 +776,15 @@ def list_orders() -> list[dict]:
                   SELECT json_agg(line ORDER BY (line->>'line_no')::int)
                   FROM (
                     SELECT json_build_object(
+                      'id', oi.id,
                       'line_no', oi.line_no,
                       'quantity', oi.quantity,
                       'line_subtotal', oi.line_subtotal,
                       'line_discount', oi.line_discount,
                       'line_tax', oi.line_tax,
                       'line_total', oi.line_total,
+                      'status_code', ois.code,
+                      'assigned_staff', st.full_name,
                       'selections', COALESCE(
                         (
                           SELECT json_agg(
@@ -734,6 +802,8 @@ def list_orders() -> list[dict]:
                       )
                     ) AS line
                     FROM order_items oi
+                    LEFT JOIN order_item_statuses ois ON ois.id = oi.status_id
+                    LEFT JOIN staff st ON st.id = oi.assigned_staff_id
                     WHERE oi.order_id = o.id
                   ) lines
                 ),
@@ -756,12 +826,15 @@ def list_orders() -> list[dict]:
             toppings = [s['name'] for s in selections if s['role'] == 'topping']
 
             items.append({
+                'id': raw_item.get('id'),
                 'line_no': raw_item['line_no'],
                 'quantity': raw_item['quantity'],
                 'line_subtotal': raw_item['line_subtotal'],
                 'line_discount': raw_item['line_discount'],
                 'line_tax': raw_item['line_tax'],
                 'line_total': raw_item['line_total'],
+                'status_code': raw_item.get('status_code'),
+                'assigned_staff': raw_item.get('assigned_staff'),
                 'pizza_type': pizza_type,
                 'base': base,
                 'toppings': toppings,
@@ -1002,3 +1075,109 @@ def payment_mix(days: int = 7) -> dict:
             for r in rows
         ]
     }
+
+
+STAFF_ROLES = frozenset({'staff', 'manager', 'admin'})
+
+
+class StaffNotFoundError(LookupError):
+    pass
+
+
+def _map_staff_row(row: dict) -> dict:
+    return {
+        'id': row['id'],
+        'full_name': row['full_name'],
+        'role': row['role'],
+        'has_pin': row['pin'] is not None,
+        'is_active': row['is_active'],
+    }
+
+
+def list_staff_admin(include_inactive: bool = True) -> list[dict]:
+    """List staff for admin management (optionally includes deactivated rows)."""
+    with db_cursor() as (_, cur):
+        store_id = ensure_store(cur)
+        active_clause = '' if include_inactive else 'AND is_active = true'
+        cur.execute(
+            f'''
+            SELECT id, full_name, role, pin, is_active
+            FROM staff
+            WHERE store_id = %s {active_clause}
+            ORDER BY is_active DESC, full_name
+            ''',
+            (store_id,),
+        )
+        return [_map_staff_row(row) for row in cur.fetchall()]
+
+
+def create_staff(full_name: str, role: str = 'staff', pin: str | None = None) -> dict:
+    cleaned_name = full_name.strip()
+    role_key = role.strip().lower()
+    if role_key not in STAFF_ROLES:
+        raise ValueError(f'Invalid role: {role}')
+
+    with db_cursor() as (_, cur):
+        store_id = ensure_store(cur)
+        cur.execute(
+            '''
+            INSERT INTO staff (store_id, full_name, role, pin, is_active)
+            VALUES (%s, %s, %s, %s, true)
+            RETURNING id, full_name, role, pin, is_active
+            ''',
+            (store_id, cleaned_name, role_key, pin),
+        )
+        return _map_staff_row(cur.fetchone())
+
+
+def update_staff(
+    staff_id: int,
+    *,
+    full_name: str | None = None,
+    role: str | None = None,
+    pin: str | None = None,
+    pin_set: bool = False,
+    is_active: bool | None = None,
+) -> dict:
+    updates: list[str] = []
+    params: list = []
+
+    if full_name is not None:
+        updates.append('full_name = %s')
+        params.append(full_name.strip())
+    if role is not None:
+        role_key = role.strip().lower()
+        if role_key not in STAFF_ROLES:
+            raise ValueError(f'Invalid role: {role}')
+        updates.append('role = %s')
+        params.append(role_key)
+    if pin_set:
+        updates.append('pin = %s')
+        params.append(pin)
+    if is_active is not None:
+        updates.append('is_active = %s')
+        params.append(is_active)
+
+    if not updates:
+        raise ValueError('No fields to update')
+
+    with db_cursor() as (_, cur):
+        store_id = ensure_store(cur)
+        params.extend([staff_id, store_id])
+        cur.execute(
+            f'''
+            UPDATE staff
+            SET {', '.join(updates)}
+            WHERE id = %s AND store_id = %s
+            RETURNING id, full_name, role, pin, is_active
+            ''',
+            params,
+        )
+        row = cur.fetchone()
+        if not row:
+            raise StaffNotFoundError(f'Staff {staff_id} not found')
+        return _map_staff_row(row)
+
+
+def deactivate_staff(staff_id: int) -> dict:
+    return update_staff(staff_id, is_active=False)

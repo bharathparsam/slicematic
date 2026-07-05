@@ -1,0 +1,6 @@
+{
+  "prep_sla_minutes": 12,
+  "queue_poll_ms": 12000,
+  "store_open_hour": 11,
+  "store_close_hour": 23
+}
