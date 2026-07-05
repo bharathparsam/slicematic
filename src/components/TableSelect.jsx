@@ -19,10 +19,9 @@ import StoreHoursBadge from '@/components/StoreHoursBadge'
  * Fonts (DM Serif Display / Manrope / JetBrains Mono) load from Google Fonts in
  * index.html and degrade to system serif / sans / mono when offline.
  *
- * Behaviour preserved from the previous version: tables with an open order
- * (`occupied`) are blocked with a light "wrong table" nudge; radiogroup semantics,
- * keyboard focus and prefers-reduced-motion are all respected. (Adding tables is
- * an admin/config concern — the customer picker no longer creates tables.)
+ * Behaviour preserved from the previous version: reserved (admin-blocked) tables
+ * show a nudge; occupied tables can be selected to submit a one-time order rating.
+ * Radiogroup semantics, keyboard focus and prefers-reduced-motion are respected.
  */
 
 const FONT_DISPLAY = "'DM Serif Display', Georgia, 'Times New Roman', serif"
@@ -93,16 +92,17 @@ export default function TableSelect({
   selected,
   occupied = [],
   blocked = [],
+  activeOrder = null,
   menu,
   onSelect,
   onStart,
+  onRate,
   onAdmin,
   onKitchen,
   onManager,
 }) {
   const occupiedSet = new Set(occupied)
   const blockedSet = new Set(blocked)
-  const [wrongTable, setWrongTable] = useState('')
   const [reserved, setReserved] = useState(null) // { name, note }
   const [opsConfig, setOpsConfig] = useState(DEFAULT_OPS_CONFIG)
   const reduce = useReducedMotion()
@@ -116,20 +116,17 @@ export default function TableSelect({
   const featured = (menu?.pizzas ?? []).slice(0, 3)
 
   function handleTap(name) {
-    if (occupiedSet.has(name)) {
-      setReserved(null)
-      setWrongTable(name)
-      return
-    }
-    if (blockedSet.has(name)) {
-      setWrongTable('')
+    if (blockedSet.has(name) && !occupiedSet.has(name)) {
       setReserved({ name, note: RESERVED_NOTES[Math.floor(Math.random() * RESERVED_NOTES.length)] })
       return
     }
-    setWrongTable('')
     setReserved(null)
     onSelect(name)
   }
+
+  const isOccupiedSelected = selected && occupiedSet.has(selected)
+  const canStart = selected && !isOccupiedSelected && !blockedSet.has(selected)
+  const canRate = !!activeOrder && !activeOrder.rating
 
   function scrollToTables() {
     document.getElementById('tables')?.scrollIntoView({
@@ -388,7 +385,7 @@ export default function TableSelect({
         {/* Legend */}
         <div className="my-3 flex items-center gap-4">
           <LegendDot color={C.green} label="Free" />
-          <LegendDot color={C.amber} label="In use" />
+          <LegendDot color={C.amber} label="In use · tap to rate" />
           <LegendDot color={C.red} label="Reserved" />
         </div>
 
@@ -416,31 +413,6 @@ export default function TableSelect({
           )}
         </AnimatePresence>
 
-        {/* "Wrong table" nudge for an occupied table */}
-        <AnimatePresence>
-          {wrongTable && (
-            <motion.div
-              key={wrongTable}
-              role="alert"
-              initial={reduce ? { opacity: 0 } : { opacity: 0, y: -6, height: 0 }}
-              animate={{ opacity: 1, y: 0, height: 'auto' }}
-              exit={reduce ? { opacity: 0 } : { opacity: 0, y: -6, height: 0 }}
-              className="mb-3 overflow-hidden"
-            >
-              <div
-                className="flex items-start gap-2.5 rounded-xl px-4 py-3 text-sm"
-                style={{ background: '#fdeccb', border: `1px solid ${C.border2}`, color: C.gold }}
-              >
-                <WrongTableIcon className="mt-0.5 h-4 w-4 shrink-0" />
-                <span>
-                  Oops — <span className="font-semibold">{wrongTable}</span> is already munching!
-                  Please pick the number shown on <span className="font-semibold">your</span> table.
-                </span>
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-
         {/* Table grid */}
         <motion.div
           role="radiogroup"
@@ -453,15 +425,15 @@ export default function TableSelect({
           {tables.map((name) => {
             const isSelected = selected === name
             const isOccupied = occupiedSet.has(name)
-            const isBlocked = !isOccupied && blockedSet.has(name)
-            const locked = isOccupied || isBlocked
+            const isBlocked = blockedSet.has(name) && !isOccupied
+            const locked = isBlocked
             return (
               <motion.button
                 key={name}
                 type="button"
                 role="radio"
                 aria-checked={isSelected}
-                aria-label={`${name}${isOccupied ? ', in use' : isBlocked ? ', reserved' : ''}`}
+                aria-label={`${name}${isOccupied ? ', in use, tap to rate' : isBlocked ? ', reserved' : ''}`}
                 onClick={() => handleTap(name)}
                 variants={{ hidden: { opacity: 0, scale: 0.92 }, show: { opacity: 1, scale: 1 } }}
                 whileTap={locked ? undefined : { scale: 0.96 }}
@@ -495,7 +467,12 @@ export default function TableSelect({
                 >
                   {isOccupied ? (
                     <>
-                      <DotIcon className="h-1.5 w-1.5" /> In use
+                      <DotIcon className="h-1.5 w-1.5" />{' '}
+                      {isSelected
+                        ? activeOrder?.rating
+                          ? `Rated ${activeOrder.rating}/5`
+                          : 'Rate order'
+                        : 'In use'}
                     </>
                   ) : isBlocked ? (
                     <>🪧 Reserved</>
@@ -524,7 +501,7 @@ export default function TableSelect({
         </div>
       </footer>
 
-      {/* STICKY ORDER BAR — appears once a (free) table is chosen. */}
+      {/* STICKY BAR — table actions */}
       <div className="sticky bottom-0 z-[60] -mt-24 rounded-b-3xl px-4 pb-4 pt-6">
         <div
           className="pointer-events-none absolute inset-0 rounded-b-3xl"
@@ -535,7 +512,7 @@ export default function TableSelect({
           {selected ? (
             <motion.div
               key="go"
-              className="relative flex items-center justify-between gap-3 rounded-2xl py-3 pl-[18px] pr-3"
+              className="relative flex flex-col gap-2 rounded-2xl py-3 pl-[18px] pr-3 sm:flex-row sm:items-center sm:justify-between"
               style={{ background: C.ink, color: C.cream, boxShadow: '0 14px 34px rgba(0,0,0,0.3)' }}
               initial={reduce ? { opacity: 0 } : { opacity: 0, y: 16 }}
               animate={{ opacity: 1, y: 0 }}
@@ -546,15 +523,38 @@ export default function TableSelect({
                 {label}{' '}
                 <b style={{ fontFamily: FONT_DISPLAY, fontSize: 18 }}>{shortName(selected, label)}</b>{' '}
                 selected
+                {activeOrder?.rating ? (
+                  <span className="ml-1 text-xs font-semibold" style={{ color: '#f0c987' }}>
+                    · rated {activeOrder.rating}/5
+                  </span>
+                ) : null}
               </span>
-              <button
-                type="button"
-                onClick={onStart}
-                className="flex-none cursor-pointer rounded-xl px-4 py-2.5 font-bold"
-                style={{ background: C.red, color: C.cream, fontSize: 14 }}
-              >
-                Start ordering →
-              </button>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={onStart}
+                  disabled={!canStart}
+                  className="rounded-xl px-4 py-2.5 font-bold disabled:cursor-not-allowed disabled:opacity-40"
+                  style={{
+                    background: canStart ? C.red : 'rgba(255,255,255,0.12)',
+                    color: C.cream,
+                    fontSize: 14,
+                    border: canStart ? 'none' : '1px solid rgba(255,255,255,0.2)',
+                  }}
+                >
+                  Start ordering →
+                </button>
+                {canRate ? (
+                  <button
+                    type="button"
+                    onClick={() => onRate?.()}
+                    className="rounded-xl px-4 py-2.5 font-bold"
+                    style={{ background: '#fff', color: C.ink, fontSize: 14 }}
+                  >
+                    Rate order ★
+                  </button>
+                ) : null}
+              </div>
             </motion.div>
           ) : (
             <motion.p
@@ -630,12 +630,19 @@ const TABLE_CELL_BASE = { fontFamily: FONT_BODY, cursor: 'pointer' }
 
 function tableCellStyle(busy, selected, blocked) {
   if (busy) {
+    if (selected) {
+      return {
+        ...TABLE_CELL_BASE,
+        background: C.goldBg,
+        border: `2px solid ${C.amber}`,
+        boxShadow: '0 10px 22px rgba(217,138,43,0.22)',
+        transform: 'translateY(-2px)',
+      }
+    }
     return {
       ...TABLE_CELL_BASE,
       background: '#faf3e6',
-      border: `1.5px dashed ${C.border2}`,
-      opacity: 0.7,
-      cursor: 'not-allowed',
+      border: `1.5px solid ${C.amber}`,
     }
   }
   if (blocked) {

@@ -22,7 +22,7 @@ const FILTERS = [
 
 // Orders table column template (kept in sync between the header + body rows).
 // The last track fits the Complete · Modify · Cancel actions on one row.
-const GRID = '96px 100px 72px 1.3fr 1.8fr 48px 108px 66px 232px'
+const GRID = '96px 100px 72px 1.3fr 1.8fr 48px 108px 66px 52px 232px'
 
 export default function AdminOrdersTable({ onModify, onExit, onKitchen, onManager, session, authReady }) {
   const [orders, setOrders] = useState([])
@@ -527,7 +527,7 @@ function OrdersPanel({
         style={{ background: '#fff', border: `1px solid ${C.border}`, boxShadow: `0 4px 0 ${C.border}` }}
       >
         <div className="overflow-x-auto">
-          <div style={{ minWidth: 1044 }}>
+          <div style={{ minWidth: 1096 }}>
             {/* header */}
             <div
               className="grid items-center gap-3.5 px-6 py-4 uppercase"
@@ -549,6 +549,7 @@ function OrdersPanel({
               <div className="text-right">Qty</div>
               <div className="text-right">Total</div>
               <div>Pay</div>
+              <div className="text-center">Rating</div>
               <div className="text-right">Actions</div>
             </div>
 
@@ -605,6 +606,16 @@ function OrdersPanel({
                       {formatCurrency(o.total)}
                     </div>
                     <div style={{ fontSize: 13, color: C.brown, fontWeight: 600 }}>{o.paymentMode}</div>
+                    <div
+                      className="text-center tabular-nums"
+                      style={{
+                        fontSize: 13,
+                        fontWeight: 700,
+                        color: o.rating ? C.green : '#c0ab8c',
+                      }}
+                    >
+                      {o.rating ? `★ ${o.rating}/5` : '—'}
+                    </div>
                     <div className="flex flex-nowrap justify-end gap-1.5">
                       {active ? (
                         <>
@@ -810,6 +821,10 @@ function AdminConfirmModal({ order, tone, busy, onCancel, onConfirm }) {
                 {complete && <Detail label="Phone" value={order.phone} mono />}
                 {order.table && <Detail label="Table" value={order.table} />}
                 {complete && <Detail label="Payment" value={order.paymentMode || '—'} />}
+                <Detail
+                  label="Rating"
+                  value={order.rating ? `${order.rating} / 5 ★` : 'Not submitted'}
+                />
                 <div className="col-span-2">
                   <dt style={{ color: C.brown2 }}>Items</dt>
                   <dd style={{ fontWeight: 600 }}>{summariseOrderItems(order)}</dd>

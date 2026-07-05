@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import TableSelect from '@/components/TableSelect'
+import RateOrderSheet from '@/components/RateOrderSheet'
 import OrderScreen from '@/components/order/OrderScreen'
 import DoneScreen from '@/components/order/DoneScreen'
 import PizzaLoader from '@/components/order/PizzaLoader'
@@ -13,7 +14,7 @@ import { loadTaxConfig, DEFAULT_TAX_CONFIG } from '@/lib/taxConfig'
 import { loadTables, DEFAULT_TABLES } from '@/lib/tablesLoader'
 import { validateName, validatePhone } from '@/lib/validators'
 import { computeOrderBill } from '@/lib/billing'
-import { saveOrder, updateOrder, getOccupiedTables } from '@/lib/orderStore'
+import { saveOrder, updateOrder, getAllOrders, rateOrder, findActiveOrderForTable } from '@/lib/orderStore'
 import { listTables, mergeTablesWithState } from '@/lib/tableStore'
 import { getAllSoldOut } from '@/lib/menuStore'
 import { getSession, onAuthChange } from '@/lib/auth'
@@ -212,12 +213,18 @@ function OrderFlow({ editingOrder = null, onDoneEditing, onAdmin, onKitchen, onM
     window.scrollTo({ top: 0, left: 0, behavior: 'auto' })
   }, [stage])
 
-  // Tables with an open (active) order — blocked until admin completes/cancels.
+  // Tables with an open (active) order — blocked for new orders until completed/cancelled.
   const [occupiedTables, setOccupiedTables] = useState([])
+  const [openOrders, setOpenOrders] = useState([])
+  const [rateOpen, setRateOpen] = useState(false)
 
   async function refreshOccupancy() {
-    const occupied = await getOccupiedTables()
-    setOccupiedTables(occupied)
+    const orders = await getAllOrders()
+    setOpenOrders(orders)
+    const occupied = orders
+      .filter((o) => o?.table && o.status !== 'completed' && o.status !== 'cancelled')
+      .map((o) => o.table)
+    setOccupiedTables([...new Set(occupied)])
   }
 
   useEffect(() => {
@@ -422,30 +429,49 @@ function OrderFlow({ editingOrder = null, onDoneEditing, onAdmin, onKitchen, onM
 
   // Table-selection landing screen.
   if (stage === 'table') {
+    const activeOrder = findActiveOrderForTable(openOrders, table)
     return (
-      <AnimatePresence mode="wait">
-        <motion.div
-          key="table"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          transition={{ duration: 0.2 }}
-        >
-          <TableSelect
-            tables={tables}
-            label={tableLabel}
-            selected={table}
-            occupied={occupiedTables}
-            blocked={blockedTables}
-            menu={menu}
-            onSelect={setTable}
-            onStart={() => setStage('order')}
-            onAdmin={onAdmin}
-            onKitchen={onKitchen}
-            onManager={onManager}
-          />
-        </motion.div>
-      </AnimatePresence>
+      <>
+        <AnimatePresence mode="wait">
+          <motion.div
+            key="table"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2 }}
+          >
+            <TableSelect
+              tables={tables}
+              label={tableLabel}
+              selected={table}
+              occupied={occupiedTables}
+              blocked={blockedTables}
+              activeOrder={activeOrder}
+              menu={menu}
+              onSelect={setTable}
+              onStart={() => setStage('order')}
+              onRate={() => setRateOpen(true)}
+              onAdmin={onAdmin}
+              onKitchen={onKitchen}
+              onManager={onManager}
+            />
+          </motion.div>
+        </AnimatePresence>
+        <RateOrderSheet
+          open={rateOpen && !!activeOrder}
+          order={activeOrder}
+          tableLabel={tableLabel}
+          onClose={() => {
+            setRateOpen(false)
+            refreshOccupancy()
+          }}
+          onSubmit={async (orderId, rating) => {
+            const result = await rateOrder(orderId, rating)
+            if (result.ok) await refreshOccupancy()
+            return result
+          }}
+        />
+      </>
     )
   }
 

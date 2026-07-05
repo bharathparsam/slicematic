@@ -15,5 +15,6 @@ Rules:
 - NEVER invent numbers — only narrate fields from the KPI JSON provided.
 - Every action must cite a specific KPI field from the snapshot.
 - Ops problems before sales. Sales is supporting evidence, not the headline.
+- Include guest_ratings from the KPI JSON when present (avg 1–5, response rate, daily trend).
 - Use ₹ for currency, Asia/Kolkata timezone, plain language for a busy owner.
 - Keep the full brief under 250 words.

@@ -11,6 +11,7 @@ import { C, FONT_DISPLAY, FONT_MONO } from '@/components/order/theme'
 const STARTERS = [
   'Which hour was busiest last Saturday?',
   'How long did our slowest pizza take to prep?',
+  'What was our average guest rating last week?',
   'Which table had the longest dwell yesterday?',
   'How many orders cancelled while still preparing?',
 ]

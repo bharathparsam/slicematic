@@ -50,6 +50,17 @@ export async function getSalesDaily(days = 7) {
   }
 }
 
+/** Average guest rating per business day for the last N days. */
+export async function getRatingsDaily(days = 7) {
+  try {
+    const data = await apiFetch(`/api/analytics/ratings_daily?days=${days}`)
+    return data.days ?? []
+  } catch (err) {
+    console.warn('[analyticsStore] could not fetch daily ratings', err)
+    return []
+  }
+}
+
 /** Ops-first analytics summary (4 categories). */
 export async function getAnalyticsSummary(days = 7) {
   try {

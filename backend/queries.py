@@ -194,6 +194,10 @@ class OrderAlreadyTerminalError(ValueError):
     pass
 
 
+class OrderAlreadyRatedError(ValueError):
+    pass
+
+
 class TableAlreadyExistsError(ValueError):
     pass
 
@@ -410,6 +414,59 @@ def complete_order(order_public_id: str) -> dict:
         'order_code': row['order_code'],
         'status': 'completed',
         'table': row['table'],
+    }
+
+
+def rate_order(order_public_id: str, rating: int) -> dict:
+    """Store a one-time 1–5 guest rating for an active order."""
+    if rating not in (1, 2, 3, 4, 5):
+        raise ValueError('Rating must be between 1 and 5')
+
+    with db_cursor() as (_, cur):
+        cur.execute(
+            '''
+            SELECT
+              o.id,
+              o.public_id::text AS order_id,
+              o.order_code,
+              o.notes AS table,
+              s.code AS status_code,
+              s.is_cancelled
+            FROM orders o
+            JOIN order_statuses s ON s.id = o.status_id
+            WHERE o.public_id = %s
+            ''',
+            (order_public_id,),
+        )
+        row = cur.fetchone()
+        if not row:
+            raise OrderNotFoundError(f'Order {order_public_id} not found')
+
+        if row['status_code'] == 'completed' or row['is_cancelled']:
+            raise OrderAlreadyTerminalError('Cannot rate a completed or cancelled order')
+
+        cur.execute(
+            'SELECT 1 FROM order_feedback WHERE order_id = %s',
+            (row['id'],),
+        )
+        if cur.fetchone():
+            raise OrderAlreadyRatedError('This order has already been rated')
+
+        cur.execute(
+            '''
+            INSERT INTO order_feedback (order_id, rating)
+            VALUES (%s, %s)
+            RETURNING rating
+            ''',
+            (row['id'], rating),
+        )
+        saved = cur.fetchone()['rating']
+
+    return {
+        'order_id': row['order_id'],
+        'order_code': row['order_code'],
+        'table': row['table'],
+        'rating': saved,
     }
 
 
@@ -852,6 +909,11 @@ def list_orders() -> list[dict]:
                 ORDER BY p.paid_at DESC
                 LIMIT 1
               ) AS payment_type,
+              (
+                SELECT f.rating
+                FROM order_feedback f
+                WHERE f.order_id = o.id
+              ) AS rating,
               COALESCE(
                 (
                   SELECT json_agg(line ORDER BY (line->>'line_no')::int)
@@ -935,6 +997,7 @@ def list_orders() -> list[dict]:
             'grand_total': row['grand_total'],
             'payment_type': row['payment_type'],
             'created_at': row['created_at'].isoformat(),
+            'rating': row['rating'],
             'items': items,
         })
 
@@ -1061,6 +1124,52 @@ def sales_daily(days: int = 7) -> dict:
                 'gross_sales': r['gross_sales'],
                 'discounts': r['discounts'],
                 'net_sales': r['net_sales'],
+            }
+            for r in rows
+        ]
+    }
+
+
+def ratings_daily(days: int = 7) -> dict:
+    """Average guest rating per business day for the last N days (zero-filled)."""
+    with db_cursor() as (_, cur):
+        cur.execute(
+            '''
+            WITH day_series AS (
+              SELECT generate_series(
+                (now() AT TIME ZONE 'Asia/Kolkata')::date - ((%s - 1) * interval '1 day'),
+                (now() AT TIME ZONE 'Asia/Kolkata')::date,
+                interval '1 day'
+              )::date AS business_date
+            ),
+            rated AS (
+              SELECT
+                o.business_date,
+                count(f.id)::int AS ratings_count,
+                round(avg(f.rating)::numeric, 2) AS avg_rating
+              FROM order_feedback f
+              JOIN orders o ON o.id = f.order_id
+              WHERE o.business_date >= (now() AT TIME ZONE 'Asia/Kolkata')::date - ((%s - 1) * interval '1 day')
+              GROUP BY o.business_date
+            )
+            SELECT
+              d.business_date,
+              COALESCE(r.ratings_count, 0) AS ratings_count,
+              r.avg_rating
+            FROM day_series d
+            LEFT JOIN rated r ON r.business_date = d.business_date
+            ORDER BY d.business_date
+            ''',
+            (days, days),
+        )
+        rows = cur.fetchall()
+
+    return {
+        'days': [
+            {
+                'business_date': r['business_date'].isoformat(),
+                'ratings_count': r['ratings_count'],
+                'avg_rating': r['avg_rating'],
             }
             for r in rows
         ]
