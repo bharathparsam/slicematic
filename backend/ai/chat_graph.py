@@ -11,6 +11,7 @@ from psycopg2.extras import RealDictCursor
 
 from ai.llm import LLMError, chat_complete, load_prompt
 from ai.sql_guard import validate_and_sanitize_sql
+from analytics_summary import analytics_summary, format_guest_ratings_context
 from db import db_cursor
 from queries import ensure_reporting_fresh, ensure_store
 
@@ -97,7 +98,7 @@ def reject_node(state: ChatState) -> ChatState:
         **state,
         'reply': (
             'I can only answer questions about your restaurant data — '
-            'try asking about prep times, cancellations, tables, or sales.'
+            'try asking about prep times, cancellations, tables, sales, or guest ratings.'
         ),
     }
 
@@ -421,6 +422,11 @@ def _persist_message(
         )
 
 
+def _merge_system_context(*parts: str | None) -> str | None:
+    merged = [p.strip() for p in parts if p and p.strip()]
+    return '\n\n'.join(merged) if merged else None
+
+
 def _get_briefing_context(briefing_id: int | None) -> str | None:
     if not briefing_id:
         return None
@@ -454,6 +460,9 @@ def run_chat(
     # (throttled — a no-op if refreshed within the TTL window).
     ensure_reporting_fresh()
 
+    summary = analytics_summary(days=7)
+    ratings_context = format_guest_ratings_context(summary.get('guest_ratings'), days=7)
+
     with db_cursor() as (_, cur):
         store_id = ensure_store(cur)
 
@@ -474,15 +483,21 @@ def run_chat(
                 ctx = _get_briefing_context(briefing_id)
                 if ctx:
                     _persist_message(tid, 'system', ctx)
+            if ratings_context:
+                _persist_message(tid, 'system', ratings_context)
 
     history = _load_thread_history(tid)
     briefing_context = _get_briefing_context(briefing_id) if is_new and briefing_id else None
+    system_context = _merge_system_context(
+        briefing_context if is_new and briefing_id else None,
+        ratings_context,
+    )
 
     state: ChatState = {
         'message': text,
         'thread_id': tid,
         'store_id': store_id,
-        'briefing_context': briefing_context,
+        'briefing_context': system_context,
         'history': history,
         'retries': 0,
     }

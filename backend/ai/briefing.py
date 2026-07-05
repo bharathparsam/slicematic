@@ -26,6 +26,7 @@ def _deterministic_brief(snapshot: dict) -> str:
     ca = cats.get('cancellations', {})
     tu = cats.get('table_utilisation', {})
     sa = cats.get('sales', {})
+    gr = snapshot.get('guest_ratings', {})
 
     avg_prep = ot.get('primary', {}).get('value')
     slowest = ot.get('secondary', {}).get('slowest_pizza')
@@ -34,11 +35,15 @@ def _deterministic_brief(snapshot: dict) -> str:
     dwell = tu.get('primary', {}).get('value')
     net_sales = sa.get('primary', {}).get('value')
     orders = sa.get('secondary', {}).get('orders', 0)
+    avg_rating = gr.get('primary', {}).get('value')
+    ratings_count = gr.get('secondary', {}).get('ratings_count', 0)
+    response_rate = gr.get('secondary', {}).get('response_rate_pct', 0)
 
     lines = [
         '## What went well',
         f'- Avg prep: {avg_prep or "—"} min. Table dwell: {dwell or "—"} min.',
         f'- Net sales ₹{net_sales or 0:,.0f} across {orders} orders.',
+        f'- Guest rating: {avg_rating or "—"}/5 from {ratings_count} responses ({response_rate}% of settled orders).',
         '',
         '## What didn\'t go well',
         f'- Cancel rate {cancel_rate or 0}% ({cancel_count} orders).',
@@ -47,6 +52,7 @@ def _deterministic_brief(snapshot: dict) -> str:
         '## What to do',
         '- Review prep queue during peak hours.',
         '- Follow up on cancelled orders at preparing stage.',
+        '- Prompt in-use tables to submit ratings when response rate is low.',
     ]
     return '\n'.join(lines)
 

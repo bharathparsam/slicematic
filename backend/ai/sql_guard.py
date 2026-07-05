@@ -29,6 +29,7 @@ ALLOWED_TABLES = frozenset({
     'stores',
     'users',
     'payments',
+    'order_feedback',
 })
 
 DENIED_COLUMNS = frozenset({

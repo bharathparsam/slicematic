@@ -1,9 +1,10 @@
 """Analytics v2 — single summary payload for Admin dashboard (ops-first)."""
 
+import json
 from decimal import Decimal
 
 from db import db_cursor
-from queries import ensure_store, payment_mix, sales_daily, top_products
+from queries import ensure_store, payment_mix, ratings_daily, sales_daily, top_products
 
 CATEGORY_ORDER = [
     'order_times',
@@ -33,6 +34,7 @@ def analytics_summary(days: int = 7) -> dict:
         cancellations = _cancellations(cur, store_id, days)
         table_util = _table_utilisation(cur, store_id, days)
         sales = _sales_category(cur, store_id, days)
+        guest_ratings = _guest_ratings(cur, store_id, days)
 
     return {
         'category_order': CATEGORY_ORDER,
@@ -42,6 +44,7 @@ def analytics_summary(days: int = 7) -> dict:
             'table_utilisation': table_util,
             'sales': sales,
         },
+        'guest_ratings': guest_ratings,
     }
 
 
@@ -400,6 +403,104 @@ def _table_utilisation(cur, store_id: int, days: int) -> dict:
             'tables_in_use_now': in_use,
         },
     }
+
+
+def _guest_ratings(cur, store_id: int, days: int) -> dict:
+    cur.execute(
+        '''
+        SELECT
+          count(f.id)::int AS ratings_count,
+          round(avg(f.rating)::numeric, 2) AS avg_rating,
+          count(*) FILTER (WHERE f.rating = 1)::int AS r1,
+          count(*) FILTER (WHERE f.rating = 2)::int AS r2,
+          count(*) FILTER (WHERE f.rating = 3)::int AS r3,
+          count(*) FILTER (WHERE f.rating = 4)::int AS r4,
+          count(*) FILTER (WHERE f.rating = 5)::int AS r5
+        FROM order_feedback f
+        JOIN orders o ON o.id = f.order_id
+        WHERE o.store_id = %s
+          AND o.business_date >= (now() AT TIME ZONE 'Asia/Kolkata')::date - ((%s - 1) * interval '1 day')
+        ''',
+        (store_id, days),
+    )
+    agg = cur.fetchone()
+
+    cur.execute(
+        '''
+        SELECT count(*)::int AS settled_orders
+        FROM orders o
+        JOIN order_statuses s ON s.id = o.status_id
+        WHERE o.store_id = %s
+          AND s.is_settled
+          AND o.business_date >= (now() AT TIME ZONE 'Asia/Kolkata')::date - ((%s - 1) * interval '1 day')
+        ''',
+        (store_id, days),
+    )
+    settled = cur.fetchone()['settled_orders'] or 0
+    ratings_count = agg['ratings_count'] or 0
+    response_rate = round(ratings_count / settled * 100, 1) if settled else 0.0
+
+    cur.execute(
+        '''
+        SELECT round(avg(f.rating)::numeric, 2) AS avg_rating
+        FROM order_feedback f
+        JOIN orders o ON o.id = f.order_id
+        WHERE o.store_id = %s
+          AND o.business_date >= (now() AT TIME ZONE 'Asia/Kolkata')::date - ((%s * 2 - 1) * interval '1 day')
+          AND o.business_date < (now() AT TIME ZONE 'Asia/Kolkata')::date - ((%s - 1) * interval '1 day')
+        ''',
+        (store_id, days, days),
+    )
+    prior_avg = _float_or_none(cur.fetchone()['avg_rating'])
+    current_avg = _float_or_none(agg['avg_rating'])
+    delta = round(current_avg - prior_avg, 2) if current_avg is not None and prior_avg is not None else None
+
+    daily = ratings_daily(days)['days']
+
+    return {
+        'primary': {'value': current_avg, 'format': 'stars', 'scale': '1-5 (5 best)'},
+        'secondary': {
+            'ratings_count': ratings_count,
+            'response_rate_pct': response_rate,
+            'settled_orders': settled,
+        },
+        'trend': {
+            'vs_prior_period': delta,
+            'unit': 'stars',
+            'sentiment': 'positive' if delta and delta > 0 else 'negative',
+        },
+        'details': {
+            'ratings_daily': daily,
+            'distribution': {
+                '1': agg['r1'] or 0,
+                '2': agg['r2'] or 0,
+                '3': agg['r3'] or 0,
+                '4': agg['r4'] or 0,
+                '5': agg['r5'] or 0,
+            },
+        },
+    }
+
+
+def format_guest_ratings_context(guest_ratings: dict | None, days: int = 7) -> str | None:
+    """Compact JSON context for Ask COO (injected on new chat threads)."""
+    if not guest_ratings:
+        return None
+    payload = {
+        'window_days': days,
+        'timezone': 'Asia/Kolkata',
+        'guest_ratings': guest_ratings,
+    }
+    return (
+        f'Guest order rating stats (last {days} days, Asia/Kolkata business dates):\n'
+        + json.dumps(payload, ensure_ascii=False, default=_decimal_default)
+    )
+
+
+def _decimal_default(value: object) -> object:
+    if isinstance(value, Decimal):
+        return float(value)
+    raise TypeError(f'Object of type {type(value).__name__} is not JSON serializable')
 
 
 def _sales_category(cur, store_id: int, days: int) -> dict:

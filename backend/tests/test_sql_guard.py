@@ -61,6 +61,19 @@ def test_allows_materialized_views():
     assert r.ok
 
 
+def test_allows_order_feedback_with_orders_join():
+    r = validate_and_sanitize_sql(
+        '''
+        SELECT round(avg(f.rating)::numeric, 2) AS avg_rating
+        FROM order_feedback f
+        JOIN orders o ON o.id = f.order_id
+        WHERE o.store_id = 1
+        '''
+    )
+    assert r.ok
+    assert 'order_feedback' in r.sql.lower()
+
+
 def test_order_by_column_not_treated_as_table():
     r = validate_and_sanitize_sql(
         '''

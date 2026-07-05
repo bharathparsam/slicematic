@@ -3,6 +3,7 @@ import {
   getTopProducts,
   getAnalyticsSummary,
   getSalesRange,
+  getRatingsDaily,
 } from '@/lib/analyticsStore'
 import { formatCurrency } from '@/lib/billing'
 import { formatKpiPrimary, formatKpiSecondary } from '@/lib/analyticsFormat'
@@ -24,6 +25,7 @@ const PAY_COLORS = { cash: C.red, upi: '#e0913a', card: C.green, wallet: C.gold,
 export default function AdminAnalytics() {
   const [summary, setSummary] = useState(null)
   const [topProducts, setTopProducts] = useState([])
+  const [ratingsDaily, setRatingsDaily] = useState([])
   const [openId, setOpenId] = useState(null)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
@@ -34,12 +36,17 @@ export default function AdminAnalytics() {
     setLoading(true)
     setLoadError('')
     try {
-      const [s, top] = await Promise.all([getAnalyticsSummary(7), getTopProducts(8)])
+      const [s, top, ratings] = await Promise.all([
+        getAnalyticsSummary(7),
+        getTopProducts(8),
+        getRatingsDaily(7),
+      ])
       if (!s) {
         setLoadError('Could not load analytics from the server.')
       }
       setSummary(s)
       setTopProducts(top)
+      setRatingsDaily(ratings)
     } catch {
       setLoadError('Could not load analytics from the server.')
     } finally {
@@ -63,6 +70,12 @@ export default function AdminAnalytics() {
   // row is "today" and the sum is the 7-day figure.
   const disc7 = salesDaily.reduce((s, d) => s + Number(d.discounts || 0), 0)
   const discToday = Number(salesDaily[salesDaily.length - 1]?.discounts || 0)
+  const ratingsTotal = ratingsDaily.reduce((s, d) => s + Number(d.ratings_count || 0), 0)
+  const ratingsWeighted = ratingsDaily.reduce(
+    (s, d) => s + Number(d.avg_rating || 0) * Number(d.ratings_count || 0),
+    0
+  )
+  const avgRating7 = ratingsTotal > 0 ? ratingsWeighted / ratingsTotal : null
 
   return (
     <main className="relative min-w-0 flex-1 px-6 py-7 pb-24 sm:px-8" style={{ animation: 'floatUp .35s ease both' }}>
@@ -188,6 +201,27 @@ export default function AdminAnalytics() {
               <PanelSub>By units · 7 days</PanelSub>
               {topProducts.length ? <TopPizzas top={topProducts} /> : <EmptyNote />}
             </div>
+          </div>
+
+          <div
+            className="mt-4 rounded-[18px] px-6 py-[22px]"
+            style={{ background: '#fff', border: `1px solid ${C.border}`, boxShadow: `0 4px 0 ${C.border}` }}
+          >
+            <div className="mb-[18px] flex items-start justify-between">
+              <div>
+                <PanelTitle>Avg guest rating · last 7 days</PanelTitle>
+                <PanelSub>Mean 1–5 score per business day (5 = best)</PanelSub>
+              </div>
+              <div className="text-right">
+                <div style={{ fontFamily: FONT_DISPLAY, fontSize: 20, color: C.red }}>
+                  {avgRating7 != null ? `${avgRating7.toFixed(1)} ★` : '—'}
+                </div>
+                <div style={{ fontSize: 11, color: C.brown2, fontWeight: 600 }}>
+                  {ratingsTotal} rating{ratingsTotal === 1 ? '' : 's'}
+                </div>
+              </div>
+            </div>
+            {ratingsDaily.length ? <RatingBars daily={ratingsDaily} /> : <EmptyNote />}
           </div>
         </>
       )}
@@ -683,6 +717,38 @@ function SalesBars({ daily }) {
                 animation: 'drawBar .6s ease both',
               }}
             />
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+function RatingBars({ daily }) {
+  const max = 5
+  return (
+    <div className="flex h-[160px] items-end gap-2 pt-2">
+      {daily.map((d) => {
+        const avg = d.avg_rating != null ? Number(d.avg_rating) : 0
+        const has = Number(d.ratings_count || 0) > 0 && avg > 0
+        return (
+          <div key={d.business_date} className="flex h-full flex-1 flex-col items-center justify-end gap-1">
+            <div style={{ fontFamily: FONT_MONO, fontSize: 9, color: C.brown2 }}>
+              {has ? `${avg.toFixed(1)}★` : '—'}
+            </div>
+            <div
+              className="w-full"
+              title={has ? `${d.ratings_count} rating(s)` : 'No ratings'}
+              style={{
+                height: `${has ? Math.max(6, (avg / max) * 100) : 3}%`,
+                borderRadius: '6px 6px 2px 2px',
+                background: has ? C.green : '#eee0c8',
+                animation: 'drawBar .6s ease both',
+              }}
+            />
+            <div style={{ fontSize: 9, color: C.brown3, fontWeight: 600 }}>
+              {fmtDay(d.business_date).split(',')[0]}
+            </div>
           </div>
         )
       })}

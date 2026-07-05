@@ -8,8 +8,9 @@ import { C } from './theme'
  * backdrop tap. The panel scrolls internally; put sticky headers/footers in
  * `children`. Respects prefers-reduced-motion.
  */
-export default function BottomSheet({ open, onClose, labelledBy, maxHeight = '92vh', children }) {
+export default function BottomSheet({ open, onClose, labelledBy, maxHeight = '92vh', zIndex = 50, children }) {
   const reduce = useReducedMotion()
+  const panelZ = zIndex + 1
 
   useEffect(() => {
     if (!open) return
@@ -29,8 +30,8 @@ export default function BottomSheet({ open, onClose, labelledBy, maxHeight = '92
       {open && (
         <>
           <motion.div
-            className="fixed inset-0 z-50"
-            style={{ background: C.scrim }}
+            className="fixed inset-0"
+            style={{ background: C.scrim, zIndex }}
             onClick={onClose}
             aria-hidden="true"
             initial={{ opacity: 0 }}
@@ -42,8 +43,8 @@ export default function BottomSheet({ open, onClose, labelledBy, maxHeight = '92
             role="dialog"
             aria-modal="true"
             aria-labelledby={labelledBy}
-            className="noscroll fixed inset-x-0 bottom-0 z-[51] mx-auto w-full max-w-[440px] overflow-y-auto rounded-t-[24px]"
-            style={{ background: C.cream, color: C.ink, maxHeight }}
+            className="noscroll fixed inset-x-0 bottom-0 mx-auto w-full max-w-[440px] overflow-y-auto rounded-t-[24px]"
+            style={{ background: C.cream, color: C.ink, maxHeight, zIndex: panelZ }}
             initial={reduce ? { opacity: 0 } : { y: '100%' }}
             animate={reduce ? { opacity: 1 } : { y: 0 }}
             exit={reduce ? { opacity: 0 } : { y: '100%' }}

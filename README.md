@@ -236,12 +236,14 @@ VITE_API_URL=http://localhost:8000 npm run dev
 | `GET` | `/api/orders` | List all orders, newest first |
 | `POST` | `/api/complete_order` | Mark an order completed |
 | `POST` | `/api/cancel_order` | Cancel an active order |
+| `POST` | `/api/rate_order` | Submit a one-time guest rating (1–5) for an active order |
 | `PUT` | `/api/orders/{order_id}` | Update an order (modify flow) |
 | `GET` | `/api/tables` | List store tables |
 | `POST` | `/api/new_table` | Add a table |
 | `GET` | `/api/analytics/orders_per_hour` | Hourly order counts (7 days) |
 | `GET` | `/api/analytics/top_products` | Best-selling pizzas |
 | `GET` | `/api/analytics/sales_daily` | Daily net/gross sales |
+| `GET` | `/api/analytics/ratings_daily` | Daily average guest rating (1–5) |
 | `GET` | `/api/analytics/payment_mix` | Payment mix (last N days) |
 | `POST` | `/api/analytics/chat` | COO chatbot — natural-language analytics Q&A |
 

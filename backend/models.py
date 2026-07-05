@@ -85,7 +85,20 @@ class OrderOut(BaseModel):
     grand_total: Decimal
     payment_type: str | None
     created_at: str
+    rating: int | None = None
     items: list[OrderItemOut]
+
+
+class RateOrderRequest(BaseModel):
+    order_id: str = Field(..., min_length=36, max_length=36)
+    rating: int = Field(..., ge=1, le=5)
+
+
+class RateOrderResponse(BaseModel):
+    order_id: str
+    order_code: str
+    table: str | None = None
+    rating: int
 
 
 class CompleteOrderRequest(BaseModel):
@@ -175,6 +188,16 @@ class DailySalesPoint(BaseModel):
 
 class SalesDailyResponse(BaseModel):
     days: list[DailySalesPoint]
+
+
+class DailyRatingPoint(BaseModel):
+    business_date: str
+    ratings_count: int
+    avg_rating: Decimal | None = None
+
+
+class RatingsDailyResponse(BaseModel):
+    days: list[DailyRatingPoint]
 
 
 class PaymentMixEntry(BaseModel):

@@ -38,6 +38,9 @@ from models import (
     RemoveTableRequest,
     OrdersPerHourResponse,
     PaymentMixResponse,
+    RateOrderRequest,
+    RateOrderResponse,
+    RatingsDailyResponse,
     SalesDailyResponse,
     SetAvailabilityRequest,
     CreateStaffRequest,
@@ -51,6 +54,7 @@ from models import (
     TransitionItemRequest,
 )
 from queries import (
+    OrderAlreadyRatedError,
     OrderAlreadyTerminalError,
     OrderNotFoundError,
     StaffNotFoundError as AdminStaffNotFoundError,
@@ -68,6 +72,8 @@ from queries import (
     list_store_tables,
     orders_per_hour,
     payment_mix,
+    rate_order,
+    ratings_daily,
     remove_store_table,
     sales_daily,
     sales_range,
@@ -85,7 +91,12 @@ app = FastAPI(
     version='0.2.0',
 )
 
-_DEFAULT_ORIGINS = 'http://localhost:5173,http://127.0.0.1:5173'
+_DEFAULT_ORIGINS = (
+    'http://localhost:5173,'
+    'http://127.0.0.1:5173,'
+    'http://localhost:8000,'
+    'http://127.0.0.1:8000'
+)
 ALLOWED_ORIGINS = [
     o.strip()
     for o in os.getenv('ALLOWED_ORIGINS', _DEFAULT_ORIGINS).split(',')
@@ -142,6 +153,22 @@ def complete_order_api(payload: CompleteOrderRequest):
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except OrderAlreadyTerminalError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except OperationalError as exc:
+        _db_unavailable(exc)
+
+
+@app.post('/api/rate_order', response_model=RateOrderResponse)
+def rate_order_api(payload: RateOrderRequest):
+    try:
+        return rate_order(payload.order_id, payload.rating)
+    except OrderNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except OrderAlreadyRatedError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except OrderAlreadyTerminalError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except OperationalError as exc:
         _db_unavailable(exc)
 
@@ -360,6 +387,14 @@ def top_products_api(limit: int = 8):
 def sales_daily_api(days: int = 7):
     try:
         return sales_daily(max(1, min(days, 90)))
+    except OperationalError as exc:
+        _db_unavailable(exc)
+
+
+@app.get('/api/analytics/ratings_daily', response_model=RatingsDailyResponse)
+def ratings_daily_api(days: int = 7):
+    try:
+        return ratings_daily(max(1, min(days, 90)))
     except OperationalError as exc:
         _db_unavailable(exc)
 

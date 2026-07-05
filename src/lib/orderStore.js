@@ -97,6 +97,7 @@ export function mapApiOrder(row) {
     timestamp: row.created_at,
     savedAt: row.created_at,
     status: row.status ?? 'active',
+    rating: row.rating ?? null,
   }
 }
 
@@ -217,6 +218,41 @@ export async function completeOrder(id) {
     console.error('[orderStore] failed to complete order', err)
     return { ok: false, reason: 'write-failed', message: err.message }
   }
+}
+
+/** Submit a one-time 1–5 guest rating for an active order (5 = best). */
+export async function rateOrder(id, rating) {
+  try {
+    const result = await apiFetch('/api/rate_order', {
+      method: 'POST',
+      body: JSON.stringify({ order_id: id, rating }),
+    })
+    return {
+      ok: true,
+      order: {
+        id: result.order_id,
+        orderCode: result.order_code,
+        table: result.table ?? null,
+        rating: result.rating,
+      },
+    }
+  } catch (err) {
+    console.error('[orderStore] failed to rate order', err)
+    return { ok: false, reason: 'write-failed', message: err.message }
+  }
+}
+
+/** Active (non-terminal) order for a table label, if any. */
+export function findActiveOrderForTable(orders, tableLabel) {
+  if (!tableLabel) return null
+  return (
+    orders.find(
+      (o) =>
+        o?.table === tableLabel &&
+        o.status !== 'completed' &&
+        o.status !== 'cancelled'
+    ) ?? null
+  )
 }
 
 /** Which tables currently have an OPEN order. Pure read. */
