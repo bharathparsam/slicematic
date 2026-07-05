@@ -3,6 +3,7 @@ import { motion, AnimatePresence, useReducedMotion } from 'framer-motion'
 import AdminAnalytics from '@/components/AdminAnalytics'
 import AdminMenu from '@/components/AdminMenu'
 import AdminStaff from '@/components/AdminStaff'
+import AdminTables from '@/components/AdminTables'
 import ViewNav from '@/components/ViewNav'
 import { kitchenProgressLabel } from '@/lib/analyticsFormat'
 import { getAllOrders, completeOrder, cancelOrder } from '@/lib/orderStore'
@@ -154,6 +155,8 @@ export default function AdminOrdersTable({ onModify, onExit, onKitchen, onManage
               <AdminAnalytics />
             ) : section === 'menu' ? (
               <AdminMenu />
+            ) : section === 'tables' ? (
+              <AdminTables />
             ) : section === 'staff' ? (
               <AdminStaff />
             ) : (
@@ -240,6 +243,7 @@ function Sidebar({ section, setSection, activeCount, todaySales, todayOrders, to
   const items = [
     { key: 'orders', icon: '📋', label: 'Orders', badge: activeCount || '' },
     { key: 'menu', icon: '🍕', label: 'Alter Menu', badge: '' },
+    { key: 'tables', icon: '🪑', label: 'Tables', badge: '' },
     { key: 'staff', icon: '👥', label: 'Staff', badge: '' },
     { key: 'analytics', icon: '📊', label: 'Analytics', badge: '' },
   ]

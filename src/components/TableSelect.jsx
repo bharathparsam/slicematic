@@ -79,11 +79,20 @@ function shortName(name, label) {
   return name.startsWith(prefix) ? name.slice(prefix.length) : name
 }
 
+// Sweet + funny nudges shown when a guest taps a reserved (admin-blocked) table.
+const RESERVED_NOTES = [
+  'is reserved for a VIP tonight 🌟 — grab any open table and we’ll get you fed!',
+  'is playing hard to get 😅 (it’s reserved) — hop onto a green table and your pizza’s on its way!',
+  'has a “Reserved” sign on it 🪧 — pick a free one and hot slices are incoming!',
+  'is saving its seat for someone special 💛 — choose the next empty table, we’ve got you!',
+]
+
 export default function TableSelect({
   tables,
   label = 'Table',
   selected,
   occupied = [],
+  blocked = [],
   menu,
   onSelect,
   onStart,
@@ -92,7 +101,9 @@ export default function TableSelect({
   onManager,
 }) {
   const occupiedSet = new Set(occupied)
+  const blockedSet = new Set(blocked)
   const [wrongTable, setWrongTable] = useState('')
+  const [reserved, setReserved] = useState(null) // { name, note }
   const [opsConfig, setOpsConfig] = useState(DEFAULT_OPS_CONFIG)
   const reduce = useReducedMotion()
 
@@ -100,16 +111,23 @@ export default function TableSelect({
     loadOpsConfig().then(setOpsConfig)
   }, [])
 
-  const freeCount = tables.filter((t) => !occupiedSet.has(t)).length
+  const freeCount = tables.filter((t) => !occupiedSet.has(t) && !blockedSet.has(t)).length
   const pizzaCount = menu?.pizzas?.length ?? 0
   const featured = (menu?.pizzas ?? []).slice(0, 3)
 
   function handleTap(name) {
     if (occupiedSet.has(name)) {
+      setReserved(null)
       setWrongTable(name)
       return
     }
+    if (blockedSet.has(name)) {
+      setWrongTable('')
+      setReserved({ name, note: RESERVED_NOTES[Math.floor(Math.random() * RESERVED_NOTES.length)] })
+      return
+    }
     setWrongTable('')
+    setReserved(null)
     onSelect(name)
   }
 
@@ -371,7 +389,32 @@ export default function TableSelect({
         <div className="my-3 flex items-center gap-4">
           <LegendDot color={C.green} label="Free" />
           <LegendDot color={C.amber} label="In use" />
+          <LegendDot color={C.red} label="Reserved" />
         </div>
+
+        {/* Reserved-table nudge — sweet + funny */}
+        <AnimatePresence>
+          {reserved && (
+            <motion.div
+              key={reserved.name}
+              role="alert"
+              initial={reduce ? { opacity: 0 } : { opacity: 0, y: -6, height: 0 }}
+              animate={{ opacity: 1, y: 0, height: 'auto' }}
+              exit={reduce ? { opacity: 0 } : { opacity: 0, y: -6, height: 0 }}
+              className="mb-3 overflow-hidden"
+            >
+              <div
+                className="flex items-start gap-2.5 rounded-xl px-4 py-3 text-sm"
+                style={{ background: '#fde8e2', border: '1px solid #f2c9bd', color: C.red }}
+              >
+                <span className="mt-0.5 shrink-0" aria-hidden="true">🪧</span>
+                <span>
+                  <span className="font-semibold">{reserved.name}</span> {reserved.note}
+                </span>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* "Wrong table" nudge for an occupied table */}
         <AnimatePresence>
@@ -410,18 +453,20 @@ export default function TableSelect({
           {tables.map((name) => {
             const isSelected = selected === name
             const isOccupied = occupiedSet.has(name)
+            const isBlocked = !isOccupied && blockedSet.has(name)
+            const locked = isOccupied || isBlocked
             return (
               <motion.button
                 key={name}
                 type="button"
                 role="radio"
                 aria-checked={isSelected}
-                aria-label={`${name}${isOccupied ? ', in use' : ''}`}
+                aria-label={`${name}${isOccupied ? ', in use' : isBlocked ? ', reserved' : ''}`}
                 onClick={() => handleTap(name)}
                 variants={{ hidden: { opacity: 0, scale: 0.92 }, show: { opacity: 1, scale: 1 } }}
-                whileTap={isOccupied ? undefined : { scale: 0.96 }}
+                whileTap={locked ? undefined : { scale: 0.96 }}
                 className="relative flex flex-col items-center gap-1.5 rounded-[15px] px-2 pb-3.5 pt-[18px] transition-all duration-150 motion-reduce:transition-none"
-                style={tableCellStyle(isOccupied, isSelected)}
+                style={tableCellStyle(isOccupied, isSelected, isBlocked)}
               >
                 <span
                   className="uppercase"
@@ -439,19 +484,21 @@ export default function TableSelect({
                     fontFamily: FONT_DISPLAY,
                     fontSize: 34,
                     lineHeight: 1,
-                    color: isSelected ? C.red : C.ink,
+                    color: isSelected ? C.red : isBlocked ? C.brown3 : C.ink,
                   }}
                 >
                   {shortName(name, label)}
                 </span>
                 <span
                   className="inline-flex items-center gap-1 uppercase"
-                  style={tableBadgeStyle(isOccupied, isSelected)}
+                  style={tableBadgeStyle(isOccupied, isSelected, isBlocked)}
                 >
                   {isOccupied ? (
                     <>
                       <DotIcon className="h-1.5 w-1.5" /> In use
                     </>
+                  ) : isBlocked ? (
+                    <>🪧 Reserved</>
                   ) : isSelected ? (
                     'Selected ✓'
                   ) : (
@@ -581,13 +628,22 @@ function LegendDot({ color, label }) {
 
 const TABLE_CELL_BASE = { fontFamily: FONT_BODY, cursor: 'pointer' }
 
-function tableCellStyle(busy, selected) {
+function tableCellStyle(busy, selected, blocked) {
   if (busy) {
     return {
       ...TABLE_CELL_BASE,
       background: '#faf3e6',
       border: `1.5px dashed ${C.border2}`,
       opacity: 0.7,
+      cursor: 'not-allowed',
+    }
+  }
+  if (blocked) {
+    return {
+      ...TABLE_CELL_BASE,
+      background: '#fbeee9',
+      border: `1.5px dashed #e6b3a5`,
+      opacity: 0.85,
       cursor: 'not-allowed',
     }
   }
@@ -603,9 +659,10 @@ function tableCellStyle(busy, selected) {
   return { ...TABLE_CELL_BASE, background: '#fbf7ee', border: `1.5px solid ${C.border3}` }
 }
 
-function tableBadgeStyle(busy, selected) {
+function tableBadgeStyle(busy, selected, blocked) {
   const base = { fontSize: 9.5, letterSpacing: '0.05em' }
   if (busy) return { ...base, fontWeight: 700, color: C.amber }
+  if (blocked) return { ...base, fontWeight: 700, color: C.red }
   if (selected) return { ...base, fontWeight: 800, color: C.red }
   return { ...base, fontWeight: 700, color: C.green }
 }

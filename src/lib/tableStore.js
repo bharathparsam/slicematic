@@ -50,11 +50,57 @@ export async function createTable(tableNumber) {
   }
 }
 
+/** Reserve / un-reserve a table by label. */
+export async function setTableBlocked(label, blocked) {
+  try {
+    const row = await apiFetch('/api/block_table', {
+      method: 'POST',
+      body: JSON.stringify({ label, blocked }),
+    })
+    return { ok: true, table: row }
+  } catch (err) {
+    return { ok: false, message: err.message }
+  }
+}
+
+/** Remove (soft-delete) a table by label. Fails if a guest is seated. */
+export async function removeTable(label) {
+  try {
+    const row = await apiFetch('/api/remove_table', {
+      method: 'POST',
+      body: JSON.stringify({ label }),
+    })
+    return { ok: true, table: row }
+  } catch (err) {
+    return { ok: false, message: err.message }
+  }
+}
+
 /** Merge config file tables with API tables, de-duplicated and naturally sorted. */
 export function mergeTableLabels(configTables, apiTables, labelPrefix = 'Table') {
   const fromApi = (apiTables ?? []).map((t) => t.label).filter(Boolean)
   const merged = [...new Set([...(configTables ?? []), ...fromApi])]
   return sortTableLabels(merged, labelPrefix)
+}
+
+/**
+ * Derive the customer-facing table list + the set of blocked (reserved) labels
+ * from the config file and the API rows. A table the admin removed (is_active
+ * false) is subtracted even if it's still in the config file.
+ * @returns {{ tables: string[], blocked: string[] }}
+ */
+export function mergeTablesWithState(configTables, apiRows, labelPrefix = 'Table') {
+  const rows = apiRows ?? []
+  const removed = new Set(rows.filter((r) => r.is_active === false).map((r) => r.label))
+  const activeApi = rows.filter((r) => r.is_active !== false).map((r) => r.label).filter(Boolean)
+  const all = [...new Set([...(configTables ?? []), ...activeApi])].filter((l) => !removed.has(l))
+  const blocked = rows
+    .filter((r) => r.is_active !== false && r.is_blocked && !removed.has(r.label))
+    .map((r) => r.label)
+  return {
+    tables: sortTableLabels(all, labelPrefix),
+    blocked: sortTableLabels(blocked, labelPrefix),
+  }
 }
 
 export function sortTableLabels(names, labelPrefix = 'Table') {

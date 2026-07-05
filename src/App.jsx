@@ -14,7 +14,7 @@ import { loadTables, DEFAULT_TABLES } from '@/lib/tablesLoader'
 import { validateName, validatePhone } from '@/lib/validators'
 import { computeOrderBill } from '@/lib/billing'
 import { saveOrder, updateOrder, getOccupiedTables } from '@/lib/orderStore'
-import { listTables, mergeTableLabels } from '@/lib/tableStore'
+import { listTables, mergeTablesWithState } from '@/lib/tableStore'
 import { getAllSoldOut } from '@/lib/menuStore'
 import { getSession, onAuthChange } from '@/lib/auth'
 
@@ -149,6 +149,7 @@ function OrderFlow({ editingOrder = null, onDoneEditing, onAdmin, onKitchen, onM
   }))
   const [taxConfig, setTaxConfig] = useState(DEFAULT_TAX_CONFIG)
   const [tables, setTables] = useState(DEFAULT_TABLES.tables)
+  const [blockedTables, setBlockedTables] = useState([]) // reserved/held by admin
   const [tableLabel, setTableLabel] = useState(DEFAULT_TABLES.label)
   const [loadError, setLoadError] = useState('')
   const [loading, setLoading] = useState(true)
@@ -156,9 +157,11 @@ function OrderFlow({ editingOrder = null, onDoneEditing, onAdmin, onKitchen, onM
   // Session timestamp captured when the flow starts.
   const sessionStartedAt = useRef(new Date().toISOString())
 
-  async function loadTablesFromApi(cfg) {
+  async function applyTablesFromApi(cfg) {
     const apiRows = await listTables()
-    return mergeTableLabels(cfg.tables, apiRows, cfg.label)
+    const { tables: labels, blocked } = mergeTablesWithState(cfg.tables, apiRows, cfg.label)
+    setTables(labels)
+    setBlockedTables(blocked)
   }
 
   async function load() {
@@ -175,7 +178,7 @@ function OrderFlow({ editingOrder = null, onDoneEditing, onAdmin, onKitchen, onM
       setSoldOut(sold)
       setTaxConfig(cfg)
       setTableLabel(tbl.label)
-      setTables(await loadTablesFromApi(tbl))
+      await applyTablesFromApi(tbl)
       // Editing: recover real menu prices/ids by name so the bill recomputes right.
       if (isEditing) setCart(resolveCartFromOrder(editingOrder, data))
     } catch (err) {
@@ -189,7 +192,7 @@ function OrderFlow({ editingOrder = null, onDoneEditing, onAdmin, onKitchen, onM
   async function refreshTablesList() {
     const cfg = await loadTables()
     setTableLabel(cfg.label)
-    setTables(await loadTablesFromApi(cfg))
+    await applyTablesFromApi(cfg)
   }
 
   useEffect(() => {
@@ -433,6 +436,7 @@ function OrderFlow({ editingOrder = null, onDoneEditing, onAdmin, onKitchen, onM
             label={tableLabel}
             selected={table}
             occupied={occupiedTables}
+            blocked={blockedTables}
             menu={menu}
             onSelect={setTable}
             onStart={() => setStage('order')}

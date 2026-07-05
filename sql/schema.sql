@@ -92,7 +92,8 @@ create table store_tables (
   label               text not null,               -- "Table 3"
   seats               smallint,
   current_session_id  bigint,                       -- FK added after table_sessions
-  is_active           boolean not null default true,
+  is_active           boolean not null default true,   -- false = removed by admin
+  is_blocked          boolean not null default false,  -- true = reserved / held by admin
   created_at          timestamptz not null default now(),
   updated_at          timestamptz not null default now(),
   unique (store_id, label)

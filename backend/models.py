@@ -114,11 +114,23 @@ class NewTableRequest(BaseModel):
 class TableOut(BaseModel):
     id: int
     label: str
+    is_blocked: bool = False
+    is_active: bool = True
+    in_use: bool = False
 
 
 class NewTableResponse(BaseModel):
     id: int
     label: str
+
+
+class BlockTableRequest(BaseModel):
+    label: str = Field(..., min_length=1, max_length=80)
+    blocked: bool
+
+
+class RemoveTableRequest(BaseModel):
+    label: str = Field(..., min_length=1, max_length=80)
 
 
 class HourlyOrderPoint(BaseModel):

@@ -198,21 +198,37 @@ class TableAlreadyExistsError(ValueError):
     pass
 
 
+class TableInUseError(ValueError):
+    pass
+
+
 def list_store_tables() -> list[dict]:
+    '''All tables for the store (active + removed), with reservation + occupancy
+    state, so the admin table manager and the customer picker can each filter.'''
     with db_cursor() as (_, cur):
         store_id = ensure_store(cur)
         cur.execute(
             '''
-            SELECT id, label
+            SELECT id, label, is_blocked, is_active,
+                   (current_session_id IS NOT NULL) AS in_use
             FROM store_tables
-            WHERE store_id = %s AND is_active = true
+            WHERE store_id = %s
             ORDER BY id
             ''',
             (store_id,),
         )
         rows = cur.fetchall()
 
-    return [{'id': row['id'], 'label': row['label']} for row in rows]
+    return [
+        {
+            'id': row['id'],
+            'label': row['label'],
+            'is_blocked': row['is_blocked'],
+            'is_active': row['is_active'],
+            'in_use': row['in_use'],
+        }
+        for row in rows
+    ]
 
 
 def create_store_table(table_number: str, label_prefix: str = 'Table') -> dict:
@@ -222,26 +238,66 @@ def create_store_table(table_number: str, label_prefix: str = 'Table') -> dict:
     with db_cursor() as (_, cur):
         store_id = ensure_store(cur)
         cur.execute(
-            '''
-            SELECT id FROM store_tables
-            WHERE store_id = %s AND label = %s
-            LIMIT 1
-            ''',
+            'SELECT id, is_active FROM store_tables WHERE store_id = %s AND label = %s LIMIT 1',
             (store_id, label),
         )
-        if cur.fetchone():
-            raise TableAlreadyExistsError(f'{label} already exists')
+        existing = cur.fetchone()
+        if existing:
+            if existing['is_active']:
+                raise TableAlreadyExistsError(f'{label} already exists')
+            # Re-add a previously removed table.
+            cur.execute(
+                '''UPDATE store_tables
+                   SET is_active = true, is_blocked = false, updated_at = now()
+                   WHERE id = %s RETURNING id, label''',
+                (existing['id'],),
+            )
+            row = cur.fetchone()
+            return {'id': row['id'], 'label': row['label']}
 
         cur.execute(
-            '''
-            INSERT INTO store_tables (store_id, label)
-            VALUES (%s, %s)
-            RETURNING id, label
-            ''',
+            'INSERT INTO store_tables (store_id, label) VALUES (%s, %s) RETURNING id, label',
             (store_id, label),
         )
         row = cur.fetchone()
 
+    return {'id': row['id'], 'label': row['label']}
+
+
+def set_table_blocked(label: str, blocked: bool) -> dict:
+    '''Reserve/unreserve a table by label. Creates the row if the table only
+    existed in the config file, so config tables are manageable too.'''
+    with db_cursor() as (_, cur):
+        store_id = ensure_store(cur)
+        table_id = get_or_create_store_table(cur, store_id, label)
+        cur.execute(
+            '''UPDATE store_tables SET is_blocked = %s, updated_at = now()
+               WHERE id = %s RETURNING id, label, is_blocked, is_active''',
+            (blocked, table_id),
+        )
+        row = cur.fetchone()
+    return {
+        'id': row['id'], 'label': row['label'],
+        'is_blocked': row['is_blocked'], 'is_active': row['is_active'],
+    }
+
+
+def remove_store_table(label: str) -> dict:
+    '''Soft-remove a table (is_active=false). Refuses if a guest is seated so we
+    never orphan an open order.'''
+    with db_cursor() as (_, cur):
+        store_id = ensure_store(cur)
+        table_id = get_or_create_store_table(cur, store_id, label)
+        cur.execute('SELECT current_session_id FROM store_tables WHERE id = %s', (table_id,))
+        row = cur.fetchone()
+        if row and row['current_session_id']:
+            raise TableInUseError(f'{label} has an open order — complete or cancel it first')
+        cur.execute(
+            '''UPDATE store_tables SET is_active = false, is_blocked = false, updated_at = now()
+               WHERE id = %s RETURNING id, label''',
+            (table_id,),
+        )
+        row = cur.fetchone()
     return {'id': row['id'], 'label': row['label']}
 
 

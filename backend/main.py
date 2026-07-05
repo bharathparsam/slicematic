@@ -20,6 +20,7 @@ from kitchen import (
 )
 from models import (
     AssignItemRequest,
+    BlockTableRequest,
     CancelOrderRequest,
     CancelOrderResponse,
     CompleteOrderRequest,
@@ -34,6 +35,7 @@ from models import (
     NewTableRequest,
     NewTableResponse,
     OrderOut,
+    RemoveTableRequest,
     OrdersPerHourResponse,
     PaymentMixResponse,
     SalesDailyResponse,
@@ -53,6 +55,7 @@ from queries import (
     OrderNotFoundError,
     StaffNotFoundError as AdminStaffNotFoundError,
     TableAlreadyExistsError,
+    TableInUseError,
     cancel_order,
     complete_order,
     create_order,
@@ -65,9 +68,11 @@ from queries import (
     list_store_tables,
     orders_per_hour,
     payment_mix,
+    remove_store_table,
     sales_daily,
     sales_range,
     set_menu_availability,
+    set_table_blocked,
     top_products,
     update_order,
     update_staff,
@@ -178,6 +183,24 @@ def new_table_api(payload: NewTableRequest):
     try:
         return create_store_table(payload.table_number)
     except TableAlreadyExistsError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except OperationalError as exc:
+        _db_unavailable(exc)
+
+
+@app.post('/api/block_table', response_model=TableOut)
+def block_table_api(payload: BlockTableRequest):
+    try:
+        return set_table_blocked(payload.label, payload.blocked)
+    except OperationalError as exc:
+        _db_unavailable(exc)
+
+
+@app.post('/api/remove_table', response_model=NewTableResponse)
+def remove_table_api(payload: RemoveTableRequest):
+    try:
+        return remove_store_table(payload.label)
+    except TableInUseError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except OperationalError as exc:
         _db_unavailable(exc)
