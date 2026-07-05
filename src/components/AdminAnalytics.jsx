@@ -12,8 +12,7 @@ import {
   detailKeyFromQuadrant,
 } from '@/lib/analyticsDefinitions'
 import CooBriefing from '@/components/CooBriefing'
-import CooChat, { CooChatFab } from '@/components/CooChat'
-import AnalyticsCategoryStack from '@/components/analytics/AnalyticsCategoryStack'
+import CooChat from '@/components/CooChat'
 import AnalyticsDetailCard from '@/components/analytics/AnalyticsDetailCard'
 import { C, FONT_DISPLAY, FONT_MONO } from '@/components/order/theme'
 import PizzaLoader from '@/components/order/PizzaLoader'
@@ -30,9 +29,6 @@ export default function AdminAnalytics() {
   const [loadError, setLoadError] = useState('')
   const [chatOpen, setChatOpen] = useState(false)
   const [chatContext, setChatContext] = useState(null)
-  const [hintDismissed, setHintDismissed] = useState(
-    () => localStorage.getItem('analytics_hint_dismissed') === '1'
-  )
 
   async function refresh() {
     setLoading(true)
@@ -55,11 +51,6 @@ export default function AdminAnalytics() {
     refresh()
   }, [])
 
-  function dismissHint() {
-    localStorage.setItem('analytics_hint_dismissed', '1')
-    setHintDismissed(true)
-  }
-
   function handleAskFollowUp(ctx) {
     setChatContext(ctx)
     setChatOpen(true)
@@ -67,19 +58,35 @@ export default function AdminAnalytics() {
 
   const order = summary?.category_order ?? CATEGORY_ORDER
   const cats = summary?.categories ?? {}
+  const salesDaily = cats.sales?.details?.sales_daily ?? []
+  // Discounts given — the daily series ends on today's IST date, so the last
+  // row is "today" and the sum is the 7-day figure.
+  const disc7 = salesDaily.reduce((s, d) => s + Number(d.discounts || 0), 0)
+  const discToday = Number(salesDaily[salesDaily.length - 1]?.discounts || 0)
 
   return (
     <main className="relative min-w-0 flex-1 px-6 py-7 pb-24 sm:px-8" style={{ animation: 'floatUp .35s ease both' }}>
-      <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
+      {/* header */}
+      <div className="mb-[18px] flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h1 style={{ fontFamily: FONT_DISPLAY, fontWeight: 400, fontSize: 34, margin: 0, color: C.ink }}>
+          <h1 style={{ fontFamily: FONT_DISPLAY, fontWeight: 400, fontSize: 32, margin: 0, color: C.ink }}>
             Analytics
           </h1>
-          <div className="mt-1.5" style={{ fontSize: 13.5, color: C.brown2, fontWeight: 600 }}>
+          <div className="mt-1" style={{ fontSize: 13, color: C.brown2, fontWeight: 600 }}>
             Ops-first · Asia/Kolkata · last 7 days
           </div>
         </div>
-        <RefreshButton onClick={refresh} loading={loading} />
+        <div className="flex flex-wrap gap-2.5">
+          <button
+            type="button"
+            onClick={() => { setChatContext(null); setChatOpen(true) }}
+            className="flex items-center gap-2 rounded-xl px-5 py-2.5 font-bold"
+            style={{ background: C.red, color: C.cream, fontSize: 14, boxShadow: '0 8px 20px rgba(197,52,28,.28)' }}
+          >
+            <span style={{ fontSize: 15 }}>✦</span> Ask COO
+          </button>
+          <RefreshButton onClick={refresh} loading={loading} />
+        </div>
       </div>
 
       {loadError && (
@@ -90,48 +97,157 @@ export default function AdminAnalytics() {
 
       <CooBriefing onAskFollowUp={handleAskFollowUp} />
 
-      {!hintDismissed && (
-        <div
-          className="mb-4 flex items-center justify-between rounded-xl px-4 py-3"
-          style={{ background: C.goldBg, border: `1px solid ${C.border}` }}
-        >
-          <span style={{ fontSize: 13, color: C.brown, fontWeight: 600 }}>Tap a category for details</span>
-          <button type="button" onClick={dismissHint} className="font-bold" style={{ fontSize: 12, color: C.brown2 }}>
-            Dismiss
-          </button>
-        </div>
-      )}
-
       {loading && !summary ? (
         <AnalyticsSkeleton />
       ) : (
-        order.map((key) => {
-          const cat = cats[key]
-          if (!cat) return null
-          const detailsId = `analytics-${key}-details`
-          return (
-            <AnalyticsCategoryStack
-              key={key}
-              category={key}
-              primaryValue={formatKpiPrimary(key, cat.primary)}
-              secondaryLine={formatKpiSecondary(key, cat.secondary, cat.details)}
-              trend={cat.trend}
-              trendSentiment={cat.trend?.sentiment ?? (key === 'sales' ? 'positive' : 'negative')}
-              expanded={openId === key}
-              onToggle={() => setOpenId(openId === key ? null : key)}
-              stackDepth={2}
-              detailsId={detailsId}
-              showExpandHint={hintDismissed}
+        <>
+          {/* metric cards */}
+          <div className="mb-[18px] grid grid-cols-2 gap-[15px] lg:grid-cols-4">
+            {order.map((key) => {
+              const cat = cats[key]
+              if (!cat) return null
+              return (
+                <MetricCard
+                  key={key}
+                  category={key}
+                  cat={cat}
+                  open={openId === key}
+                  onDetails={() => setOpenId(openId === key ? null : key)}
+                />
+              )
+            })}
+          </div>
+
+          {/* expanded details for the open category */}
+          {openId && cats[openId] && (
+            <div
+              id={`analytics-${openId}-details`}
+              className="mb-[18px] rounded-[18px] p-5"
+              style={{ background: '#fff', border: `1px solid ${C.border}`, boxShadow: `0 4px 0 ${C.border}` }}
             >
-              <CategoryDetails category={key} cat={cat} topProducts={topProducts} />
-            </AnalyticsCategoryStack>
-          )
-        })
+              <div className="mb-3 flex items-center justify-between">
+                <PanelTitle>{CAT_META[openId]?.label} · details</PanelTitle>
+                <button
+                  type="button"
+                  onClick={() => setOpenId(null)}
+                  className="rounded-full px-3 py-1 font-bold"
+                  style={{ border: `1.5px solid ${C.border2}`, fontSize: 12, color: C.brown }}
+                >
+                  Close ✕
+                </button>
+              </div>
+              <div className={openId === 'sales' ? 'space-y-4' : 'grid gap-3 sm:grid-cols-2 lg:grid-cols-3'}>
+                <CategoryDetails category={openId} cat={cats[openId]} topProducts={topProducts} />
+              </div>
+            </div>
+          )}
+
+          {/* insight row: net sales + top pizzas */}
+          <div className="grid gap-4 lg:grid-cols-[1.5fr_1fr]">
+            <div
+              className="rounded-[18px] px-6 py-[22px]"
+              style={{ background: '#fff', border: `1px solid ${C.border}`, boxShadow: `0 4px 0 ${C.border}` }}
+            >
+              <div className="mb-[18px] flex items-start justify-between">
+                <div>
+                  <PanelTitle>Net sales · last 7 days</PanelTitle>
+                  <PanelSub>After discounts, per business day</PanelSub>
+                </div>
+                <div className="text-right">
+                  <div style={{ fontFamily: FONT_DISPLAY, fontSize: 20, color: C.red }}>
+                    {formatKpiPrimary('sales', cats.sales?.primary)}
+                  </div>
+                  <div style={{ fontSize: 11, color: C.brown2, fontWeight: 600 }}>
+                    {cats.sales?.secondary?.orders ?? 0} orders
+                  </div>
+                </div>
+              </div>
+              {/* discounts given */}
+              <div className="mb-3.5 flex flex-wrap items-center gap-x-2.5 gap-y-1" style={{ fontSize: 12.5 }}>
+                <span
+                  className="rounded-full px-2.5 py-1"
+                  style={{ background: C.goldBg, color: C.gold, fontWeight: 700, fontSize: 11.5 }}
+                >
+                  🏷️ Discounts given
+                </span>
+                <span style={{ color: C.ink, fontWeight: 700 }}>
+                  {money0(disc7)} <span style={{ color: C.brown2, fontWeight: 600 }}>· last 7 days</span>
+                </span>
+                <span style={{ color: C.brown3 }}>·</span>
+                <span style={{ color: C.ink, fontWeight: 700 }}>
+                  {money0(discToday)} <span style={{ color: C.brown2, fontWeight: 600 }}>· today</span>
+                </span>
+              </div>
+              {salesDaily.length ? <SalesBars daily={salesDaily} /> : <EmptyNote />}
+            </div>
+            <div
+              className="rounded-[18px] px-6 py-[22px]"
+              style={{ background: '#fff', border: `1px solid ${C.border}`, boxShadow: `0 4px 0 ${C.border}` }}
+            >
+              <PanelTitle>Top pizzas</PanelTitle>
+              <PanelSub>By units · 7 days</PanelSub>
+              {topProducts.length ? <TopPizzas top={topProducts} /> : <EmptyNote />}
+            </div>
+          </div>
+        </>
       )}
 
-      <CooChatFab onClick={() => { setChatContext(null); setChatOpen(true) }} />
       <CooChat open={chatOpen} onClose={() => setChatOpen(false)} briefingContext={chatContext} />
     </main>
+  )
+}
+
+// Icon / label / descriptor + tag colours per category, matched to the redesign.
+const CAT_META = {
+  order_times: { icon: '⏱️', label: 'Order times', sub: 'Avg queued → ready', tagColor: '#c5341c', tagBg: '#f7e2dd' },
+  cancellations: { icon: '✕', label: 'Cancellations', sub: 'Share of orders cancelled', tagColor: '#b06514', tagBg: '#fdeccb' },
+  table_utilisation: { icon: '🍽️', label: 'Table use', sub: 'Avg seated → closed', tagColor: '#39833f', tagBg: '#e2f1e0' },
+  sales: { icon: '₹', label: 'Sales', sub: 'Net · after discounts', tagColor: '#39833f', tagBg: '#e2f1e0' },
+}
+
+function MetricCard({ category, cat, open, onDetails }) {
+  const meta = CAT_META[category] ?? { icon: '•', label: category, sub: '', tagColor: C.brown, tagBg: C.goldBg }
+  const value = formatKpiPrimary(category, cat.primary)
+  const tag = formatKpiSecondary(category, cat.secondary, cat.details)
+  return (
+    <div
+      className="flex flex-col rounded-[18px] px-5 py-[19px]"
+      style={{ background: '#fff', border: `1px solid ${C.border}`, boxShadow: open ? `0 0 0 2px ${C.red}` : `0 4px 0 ${C.border}` }}
+    >
+      <div className="flex items-center gap-[9px]">
+        <span
+          className="flex h-[30px] w-[30px] flex-none items-center justify-center rounded-[9px]"
+          style={{ background: C.goldBg, fontSize: 15 }}
+        >
+          {meta.icon}
+        </span>
+        <span className="uppercase" style={{ fontSize: 11, letterSpacing: '0.06em', fontWeight: 700, color: '#a0876a' }}>
+          {meta.label}
+        </span>
+      </div>
+      <div style={{ fontFamily: FONT_DISPLAY, fontSize: 33, lineHeight: 1.05, marginTop: 15, color: C.ink }}>{value}</div>
+      <div style={{ fontSize: 12.5, color: C.brown2, fontWeight: 600, marginTop: 6, lineHeight: 1.4 }}>{meta.sub}</div>
+      <div
+        className="mt-[14px] flex items-center justify-between gap-2 pt-3"
+        style={{ borderTop: '1px solid #f6ecda' }}
+      >
+        <span
+          className="truncate"
+          style={{ fontSize: 11, fontWeight: 700, padding: '4px 10px', borderRadius: 999, background: meta.tagBg, color: meta.tagColor, maxWidth: 160 }}
+        >
+          {tag || '—'}
+        </span>
+        <button
+          type="button"
+          onClick={onDetails}
+          aria-expanded={open}
+          className="flex-none rounded-full font-bold"
+          style={{ border: '1.5px solid #e6d5ba', background: '#fbf7ee', color: '#a5601f', fontSize: 11.5, padding: '5px 12px' }}
+        >
+          {open ? 'Hide' : 'Details'}
+        </button>
+      </div>
+    </div>
   )
 }
 
@@ -227,6 +343,8 @@ function CategoryDetails({ category, cat, topProducts }) {
     const daily = d.sales_daily ?? []
     const payments = d.payment_mix ?? []
     const top = d.top_pizza ?? topProducts[0]
+    const disc7 = daily.reduce((s, x) => s + Number(x.discounts || 0), 0)
+    const discToday = Number(daily[daily.length - 1]?.discounts || 0)
     return (
       <>
         <AnalyticsDetailCard
@@ -234,6 +352,12 @@ function CategoryDetails({ category, cat, topProducts }) {
           definition={getDetailDefinition('avg_ticket')}
           value={money0(d.avg_ticket)}
         />
+        <AnalyticsDetailCard title="Discount · today" value={money0(discToday)}>
+          given away today
+        </AnalyticsDetailCard>
+        <AnalyticsDetailCard title="Discount · 7d" value={money0(disc7)}>
+          last 7 days
+        </AnalyticsDetailCard>
         {top && (
           <AnalyticsDetailCard
             title="Top pizza"
