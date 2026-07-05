@@ -5,7 +5,7 @@ Seed demo orders, staff, and kitchen flow for analytics + Suggestion Bhayya.
 Usage:
   python scripts/seed_demo_data.py [--reset] [--orders 80] [--days 14] [--active 8]
 
-Requires: DATABASE_URL in backend/.env, schema.sql + 001_ops_ai.sql applied.
+Requires: DATABASE_URL in backend/.env, sql/schema.sql applied.
 
 npm shortcuts:
   npm run seed:demo -- --reset --orders 80 --days 14

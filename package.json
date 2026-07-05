@@ -13,11 +13,10 @@
     "api:test": "cd backend && .venv/bin/python -m pytest",
     "seed:demo": "cd backend && .venv/bin/python ../scripts/seed_demo_data.py",
     "seed:demo:reset": "cd backend && .venv/bin/python ../scripts/seed_demo_data.py --reset --orders 80 --days 14 --active 8 --verify-analytics",
-    "db:migrate": "psql -d slicematic -f sql/migrations/001_ops_ai.sql",
     "supabase:start": "supabase start",
     "supabase:stop": "supabase stop",
     "supabase:status": "supabase status",
-    "db:local:init": "psql postgresql://postgres:postgres@127.0.0.1:54322/postgres -v ON_ERROR_STOP=1 -f sql/schema.sql && python3 scripts/apply_local_migration.py"
+    "db:local:init": "psql postgresql://postgres:postgres@127.0.0.1:54322/postgres -v ON_ERROR_STOP=1 -f sql/schema.sql"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.109.0",

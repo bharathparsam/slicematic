@@ -44,7 +44,7 @@ def get_item_status_id(cur, code: str) -> int:
     row = cur.fetchone()
     if not row:
         raise RuntimeError(
-            f"Missing item status '{code}' — run sql/migrations/001_ops_ai.sql first"
+            f"Missing item status '{code}' — run sql/schema.sql first"
         )
     return row['id']
 
