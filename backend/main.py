@@ -48,17 +48,26 @@ app = FastAPI(
 )
 
 # Comma-separated origins from env (add your Vercel domain in production);
-# falls back to the local Vite dev origins.
-_DEFAULT_ORIGINS = 'http://localhost:5173,http://127.0.0.1:5173'
+# falls back to local Vite dev origins + the deployed Vercel frontend.
+_DEFAULT_ORIGINS = (
+    'http://localhost:5173,'
+    'http://127.0.0.1:5173,'
+    'https://slicematic-three.vercel.app'
+)
 ALLOWED_ORIGINS = [
     o.strip()
     for o in os.getenv('ALLOWED_ORIGINS', _DEFAULT_ORIGINS).split(',')
     if o.strip()
 ]
 
+# Optional regex for extra origins (Vercel preview URLs, etc.).
+# Set CORS_ORIGIN_REGEX= in env to disable.
+_CORS_REGEX = os.getenv('CORS_ORIGIN_REGEX', r'https://slicematic-.*\.vercel\.app').strip()
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
+    allow_origin_regex=_CORS_REGEX or None,
     allow_credentials=True,
     allow_methods=['*'],
     allow_headers=['*'],

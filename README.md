@@ -227,6 +227,28 @@ To point the frontend at a different host:
 VITE_API_URL=http://localhost:8000 npm run dev
 ```
 
+### Production (Vercel + hosted API)
+
+The Vercel frontend calls the API cross-origin, so **both sides** must be configured:
+
+**Vercel** (Project → Settings → Environment Variables):
+
+```
+VITE_API_URL=https://your-api.onrender.com
+```
+
+**API host** (Render/Railway/etc. — same vars as `backend/.env`):
+
+```
+ALLOWED_ORIGINS=http://localhost:5173,http://127.0.0.1:5173,https://slicematic-three.vercel.app
+DATABASE_URL=...
+```
+
+The code defaults already include `https://slicematic-three.vercel.app` and a
+regex for `https://slicematic-*.vercel.app` preview URLs. If your API host sets
+`ALLOWED_ORIGINS` manually, **you must include the Vercel URL** or CORS will
+block the browser. Redeploy/restart the API after changing env vars.
+
 ### API endpoints
 
 | Method | Path | Description |
@@ -271,6 +293,9 @@ after changing `.env`.
   does not exist, or `DATABASE_URL` in `backend/.env` is wrong.
 - **Chat says "set OPENROUTER_API_KEY"** — add your OpenRouter key to
   `backend/.env` and restart the API.
+- **CORS error from Vercel** (`Access-Control-Allow-Origin` missing) — add
+  `https://slicematic-three.vercel.app` to `ALLOWED_ORIGINS` on your **API
+  host** and redeploy. Also confirm `VITE_API_URL` on Vercel points at that API.
 
 ## Menu data
 
