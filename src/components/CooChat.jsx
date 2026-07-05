@@ -118,7 +118,7 @@ export default function CooChat({ open, onClose, briefingContext }) {
               </span>
               <div style={{ lineHeight: 1.2 }}>
                 <div style={{ fontFamily: FONT_DISPLAY, fontSize: 19 }}>Ask COO</div>
-                <div style={{ fontSize: 11, color: '#c8a883', fontWeight: 600 }}>Your data, in plain English</div>
+                {/* <div style={{ fontSize: 11, color: '#c8a883', fontWeight: 600 }}>Your data, in plain English</div> */}
               </div>
             </div>
             <div className="flex gap-2">
@@ -312,9 +312,9 @@ export default function CooChat({ open, onClose, briefingContext }) {
                 ↑
               </button>
             </div>
-            <div className="mt-[9px] text-center" style={{ fontSize: 11, color: '#a0876a', fontWeight: 600 }}>
+            {/* <div className="mt-[9px] text-center" style={{ fontSize: 11, color: '#a0876a', fontWeight: 600 }}>
               Natural language → SQL → answer · reads live order data
-            </div>
+            </div> */}
           </div>
       </motion.aside>
     </AnimatePresence>,

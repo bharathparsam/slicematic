@@ -447,6 +447,25 @@ function OrdersPanel({
   onModify,
   onCancel,
 }) {
+  const PAGE_OPTS = [5, 10, 25, 50]
+  const ALL_ROWS = 100000
+  const [pageSize, setPageSize] = useState(5)
+  const [page, setPage] = useState(1)
+
+  // Back to page 1 whenever the filter changes so you never land on an empty page.
+  useEffect(() => setPage(1), [filter])
+
+  const total = orders.length
+  const pageCount = Math.max(1, Math.ceil(total / pageSize))
+  const safePage = Math.min(page, pageCount)
+  const start = (safePage - 1) * pageSize
+  const pageOrders = orders.slice(start, start + pageSize)
+
+  function changePageSize(size) {
+    setPageSize(size)
+    setPage(1)
+  }
+
   return (
     <main className="min-w-0 flex-1 px-6 py-7 sm:px-8" style={{ animation: 'floatUp .35s ease both' }}>
       <div className="mb-5 flex flex-wrap items-end justify-between gap-4">
@@ -536,7 +555,7 @@ function OrdersPanel({
                 {totalCount === 0 ? 'No orders yet. Place one from Orders.' : 'No orders match this filter.'}
               </p>
             ) : (
-              orders.map((o) => {
+              pageOrders.map((o) => {
                 const status = normOrderStatus(o.status)
                 const cancelled = status === 'cancelled'
                 const active = status === 'active'
@@ -605,8 +624,71 @@ function OrdersPanel({
             )}
           </div>
         </div>
+
+        {total > 0 && (
+          <div
+            className="flex flex-wrap items-center justify-between gap-3 px-5 py-3.5"
+            style={{ borderTop: `1px solid ${C.border}`, background: C.cream }}
+          >
+            <div className="flex items-center gap-2" style={{ fontSize: 12.5, color: C.brown2, fontWeight: 600 }}>
+              <span>Rows</span>
+              <div className="flex gap-0.5 rounded-lg p-0.5" style={{ background: '#f0e5d2' }}>
+                {PAGE_OPTS.map((s) => {
+                  const sel = pageSize === s
+                  return (
+                    <button
+                      key={s}
+                      type="button"
+                      onClick={() => changePageSize(s)}
+                      className="rounded-md px-2.5 py-1 font-bold transition-colors"
+                      style={sel ? { background: '#fff', color: C.ink, fontSize: 12.5, boxShadow: '0 1px 2px rgba(0,0,0,0.08)' } : { background: 'transparent', color: C.brown2, fontSize: 12.5 }}
+                    >
+                      {s}
+                    </button>
+                  )
+                })}
+                <button
+                  type="button"
+                  onClick={() => changePageSize(ALL_ROWS)}
+                  className="rounded-md px-2.5 py-1 font-bold transition-colors"
+                  style={pageSize === ALL_ROWS ? { background: '#fff', color: C.ink, fontSize: 12.5, boxShadow: '0 1px 2px rgba(0,0,0,0.08)' } : { background: 'transparent', color: C.brown2, fontSize: 12.5 }}
+                >
+                  All
+                </button>
+              </div>
+              <span className="hidden tabular-nums sm:inline">
+                · {start + 1}–{Math.min(start + pageSize, total)} of {total}
+              </span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <PageBtn disabled={safePage <= 1} onClick={() => setPage(safePage - 1)}>
+                ‹ Prev
+              </PageBtn>
+              <span className="tabular-nums" style={{ fontSize: 12.5, color: C.brown, fontWeight: 700, padding: '0 6px' }}>
+                Page {safePage} / {pageCount}
+              </span>
+              <PageBtn disabled={safePage >= pageCount} onClick={() => setPage(safePage + 1)}>
+                Next ›
+              </PageBtn>
+            </div>
+          </div>
+        )}
       </div>
     </main>
+  )
+}
+
+function PageBtn({ disabled, onClick, children }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className="rounded-lg px-3 py-1.5 font-bold transition-colors disabled:opacity-40"
+      style={{ border: `1.5px solid ${C.border2}`, background: '#fff', color: C.ink, fontSize: 12.5 }}
+    >
+      {children}
+    </button>
   )
 }
 

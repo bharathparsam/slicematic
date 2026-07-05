@@ -12,7 +12,7 @@ from psycopg2.extras import RealDictCursor
 from ai.llm import LLMError, chat_complete, load_prompt
 from ai.sql_guard import validate_and_sanitize_sql
 from db import db_cursor
-from queries import ensure_store
+from queries import ensure_reporting_fresh, ensure_store
 
 CHAT_PROMPT = load_prompt('coo_chat.md')
 ANSWER_PROMPT = load_prompt('coo_answer.md')
@@ -449,6 +449,10 @@ def run_chat(
     max_chars = int(os.getenv('CHAT_MAX_MESSAGE_CHARS', '500'))
     if len(text) > max_chars:
         raise ValueError(f'Message must be at most {max_chars} characters')
+
+    # Keep the mv_* reporting views current so the chat's SQL reflects live data
+    # (throttled — a no-op if refreshed within the TTL window).
+    ensure_reporting_fresh()
 
     with db_cursor() as (_, cur):
         store_id = ensure_store(cur)

@@ -1,4 +1,5 @@
 import os
+import time
 import uuid
 from datetime import date
 from decimal import Decimal, ROUND_HALF_UP
@@ -12,6 +13,30 @@ TWO_DP = Decimal('0.01')
 
 def round2(value: Decimal) -> Decimal:
     return value.quantize(TWO_DP, rounding=ROUND_HALF_UP)
+
+
+# --- Reporting freshness -----------------------------------------------------
+# The COO chat queries the mv_* materialized views (snapshots), so they must be
+# refreshed to reflect new orders / kitchen activity — otherwise a correct query
+# returns 0 rows and the assistant says "no data". Refresh at most once per TTL
+# window so back-to-back questions don't each pay the cost. Best-effort: a failed
+# refresh never breaks the caller.
+_LAST_REPORTING_REFRESH = 0.0
+_REPORTING_REFRESH_TTL = float(os.getenv('REPORTING_REFRESH_TTL', '20'))
+
+
+def ensure_reporting_fresh(force: bool = False) -> None:
+    global _LAST_REPORTING_REFRESH
+    now = time.monotonic()
+    if not force and (now - _LAST_REPORTING_REFRESH) < _REPORTING_REFRESH_TTL:
+        return
+    try:
+        with db_cursor() as (_, cur):
+            cur.execute('SELECT refresh_reporting()')
+        _LAST_REPORTING_REFRESH = now
+    except Exception:
+        # Stale data is better than a failed chat request.
+        pass
 
 
 def ensure_store(cur) -> int:
