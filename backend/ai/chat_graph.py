@@ -479,12 +479,15 @@ def run_chat(
                 ''',
                 (tid, store_id, briefing_id),
             )
-            if briefing_id:
-                ctx = _get_briefing_context(briefing_id)
-                if ctx:
-                    _persist_message(tid, 'system', ctx)
-            if ratings_context:
-                _persist_message(tid, 'system', ratings_context)
+        # Thread row is committed once the block above closes. Persist the
+        # system-context messages AFTER that — each opens its own transaction and
+        # would FK-violate against an uncommitted thread otherwise.
+        if briefing_id:
+            ctx = _get_briefing_context(briefing_id)
+            if ctx:
+                _persist_message(tid, 'system', ctx)
+        if ratings_context:
+            _persist_message(tid, 'system', ratings_context)
 
     history = _load_thread_history(tid)
     briefing_context = _get_briefing_context(briefing_id) if is_new and briefing_id else None
