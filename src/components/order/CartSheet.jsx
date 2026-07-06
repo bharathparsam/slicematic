@@ -26,6 +26,7 @@ export default function CartSheet({
   onCustBlur,
   onPayment,
   onReview,
+  onClear,
 }) {
   const cgstPct = Math.round((taxConfig?.gst?.cgst ?? 0.09) * 100)
   const sgstPct = Math.round((taxConfig?.gst?.sgst ?? 0.09) * 100)
@@ -34,12 +35,25 @@ export default function CartSheet({
   return (
     <BottomSheet open={open} onClose={onClose} labelledBy="cart-title" maxHeight="94vh">
       <SheetHeader onClose={onClose}>
-        <h2 id="cart-title" style={{ fontFamily: FONT_DISPLAY, fontWeight: 400, fontSize: 26, margin: 0 }}>
-          Your order{' '}
-          <span style={{ fontSize: 15, color: C.brown2, fontFamily: 'inherit', fontWeight: 600 }}>
-            · {label} {shortName(table, label)}
-          </span>
-        </h2>
+        <div className="flex min-w-0 flex-1 items-center justify-between gap-2">
+          <h2 id="cart-title" style={{ fontFamily: FONT_DISPLAY, fontWeight: 400, fontSize: 26, margin: 0 }}>
+            Your order{' '}
+            <span style={{ fontSize: 15, color: C.brown2, fontFamily: 'inherit', fontWeight: 600 }}>
+              · {label} {shortName(table, label)}
+            </span>
+          </h2>
+          {bill.lines.length > 0 && onClear && (
+            <button
+              type="button"
+              onClick={onClear}
+              aria-label="Clear cart"
+              className="flex flex-none items-center gap-1.5 rounded-full px-3 py-1.5 font-bold transition-colors active:scale-95"
+              style={{ border: '1.5px solid #e9c3ba', background: '#fff', color: C.red, fontSize: 12.5 }}
+            >
+              <TrashIcon className="h-3.5 w-3.5" /> Clear
+            </button>
+          )}
+        </div>
       </SheetHeader>
 
       {/* Items */}
@@ -168,6 +182,20 @@ export default function CartSheet({
         </button>
       </SheetFooter>
     </BottomSheet>
+  )
+}
+
+function TrashIcon({ className }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className={className} aria-hidden="true">
+      <path
+        d="M4 7h16M9 7V5a1 1 0 011-1h4a1 1 0 011 1v2m-8 0v12a1 1 0 001 1h8a1 1 0 001-1V7"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
   )
 }
 

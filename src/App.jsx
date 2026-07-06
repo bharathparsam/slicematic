@@ -301,6 +301,10 @@ function OrderFlow({ editingOrder = null, onDoneEditing, onAdmin, onKitchen, onM
   function removeLine(lineId) {
     setCart((c) => c.filter((line) => line.lineId !== lineId))
   }
+  function clearCart() {
+    setCart([])
+    setCartError('')
+  }
 
   // --- Place order (review popup) then confirm (API) -------------------
   function validateOrderForm() {
@@ -494,6 +498,7 @@ function OrderFlow({ editingOrder = null, onDoneEditing, onAdmin, onKitchen, onM
       onAdd={onAddCombo}
       onQty={updateLineQty}
       onRemove={removeLine}
+      onClearCart={clearCart}
       onCustChange={onCustChange}
       onCustBlur={onCustBlur}
       onPayment={(m) => {

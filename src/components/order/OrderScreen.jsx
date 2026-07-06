@@ -51,6 +51,7 @@ export default function OrderScreen({
   onAdd,
   onQty,
   onRemove,
+  onClearCart,
   onCustChange,
   onCustBlur,
   onPayment,
@@ -144,6 +145,10 @@ export default function OrderScreen({
   function handleRemove(lineId) {
     onRemove(lineId)
     if (bill.lines.length <= 1) setSheet(null) // removed the last item
+  }
+  function handleClear() {
+    onClearCart?.()
+    setSheet(null) // cart is empty now — close the sheet
   }
   function handleReview() {
     if (validate()) setShowReview(true)
@@ -366,6 +371,7 @@ export default function OrderScreen({
         onCustBlur={onCustBlur}
         onPayment={onPayment}
         onReview={handleReview}
+        onClear={handleClear}
       />
 
       <ReviewModal
