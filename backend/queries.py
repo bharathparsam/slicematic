@@ -885,10 +885,11 @@ def create_order(payload) -> dict:
     }
 
 
-def list_orders() -> list[dict]:
+def list_orders(public_id: str | None = None) -> list[dict]:
+    where_clause = 'WHERE o.public_id = %s' if public_id else ''
     with db_cursor() as (_, cur):
         cur.execute(
-            '''
+            f'''
             SELECT
               o.public_id::text AS order_id,
               o.order_code,
@@ -954,8 +955,10 @@ def list_orders() -> list[dict]:
               ) AS items
             FROM orders o
             JOIN order_statuses s ON s.id = o.status_id
+            {where_clause}
             ORDER BY o.created_at DESC
-            '''
+            ''',
+            (public_id,) if public_id else (),
         )
         rows = cur.fetchall()
 

@@ -21,3 +21,6 @@ backend/**/__pycache__
 
 # Script bytecode
 scripts/__pycache__/
+
+# Runtime flat-text order log (regenerated from the DB via order_log.rebuild_from_db)
+orders_log.txt

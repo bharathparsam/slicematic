@@ -84,6 +84,7 @@ from queries import (
     update_staff,
 )
 from suggestions import build_menu_suggestions, build_suggestions
+from order_log import append_order
 
 app = FastAPI(
     title='SliceMatic API',
@@ -134,6 +135,15 @@ def create_order_api(payload: CreateOrderRequest):
         _db_unavailable(exc)
     except RuntimeError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    # Also append to the flat-text order log (best-effort; DB is source of truth).
+    try:
+        rows = list_orders(result['order_id'])
+        if rows:
+            append_order(rows[0])
+    except Exception:
+        pass
+
     return CreateOrderResponse(**result)
 
 
