@@ -307,6 +307,21 @@ export default function OrderScreen({
         </div>
       </section>
 
+      {/* FOOTER */}
+      <footer className="px-5 pb-3 pt-2 text-center">
+        <p className="mx-auto" style={{ fontSize: 12.5, color: C.brown, fontWeight: 600, lineHeight: 1.5, maxWidth: 340 }}>
+          Need a hand? Just call the waiter — they&apos;ll be at your table in a slice
+          of a second. 🍕 We&apos;re here to help!
+        </p>
+        <a
+          href="mailto:reachus@slicematic.in"
+          className="mt-1.5 inline-block"
+          style={{ fontSize: 12, color: C.red, fontWeight: 700 }}
+        >
+          reachus@slicematic.in
+        </a>
+      </footer>
+
       {/* STICKY CART BAR */}
       {hasCart && (
         <div

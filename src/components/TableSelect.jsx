@@ -3,7 +3,7 @@ import { motion, AnimatePresence, useReducedMotion } from 'framer-motion'
 import { formatCurrency } from '@/lib/billing'
 import { loadOpsConfig, DEFAULT_OPS_CONFIG } from '@/lib/opsConfig'
 import ViewNav from '@/components/ViewNav'
-import StoreHoursBadge from '@/components/StoreHoursBadge'
+// import StoreHoursBadge from '@/components/StoreHoursBadge' // hidden for now (kept)
 
 /**
  * Landing / "select your table" — the app's home screen (the order flow's table
@@ -185,10 +185,12 @@ export default function TableSelect({
             onManager={onManager}
             onAdmin={onAdmin}
           />
+          {/* Store-hours Open/Closed badge — hidden for now (component kept).
           <StoreHoursBadge
             openHour={opsConfig.store_open_hour}
             closeHour={opsConfig.store_close_hour}
           />
+          */}
         </div>
       </div>
 
@@ -496,7 +498,19 @@ export default function TableSelect({
         style={{ borderTop: `1px solid ${C.border2}`, marginTop: 10 }}
       >
         <div style={{ fontFamily: FONT_DISPLAY, fontSize: 16, color: C.ink }}>SliceMatic</div>
-        <div style={{ fontSize: 12, color: C.brown2, marginTop: 4 }}>
+        <p className="mx-auto mt-2" style={{ fontSize: 13, color: C.brown, fontWeight: 600, lineHeight: 1.55, maxWidth: 360 }}>
+          Hungry, stuck, or craving extra cheese? Don&apos;t get up — just call the
+          waiter and they&apos;ll be at your table before your slice cools down.
+          We&apos;re always here to help! 🍕
+        </p>
+        <a
+          href="mailto:reachus@slicematic.in"
+          className="mt-2.5 inline-block transition-opacity hover:opacity-80"
+          style={{ fontSize: 13, color: C.red, fontWeight: 800 }}
+        >
+          reachus@slicematic.in
+        </a>
+        <div style={{ fontSize: 11.5, color: C.brown2, marginTop: 8 }}>
           Open daily · 11am – 11pm · Delhi
         </div>
       </footer>

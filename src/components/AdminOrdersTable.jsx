@@ -178,6 +178,20 @@ export default function AdminOrdersTable({ onModify, onExit, onKitchen, onManage
             )}
           </div>
         )}
+        {unlocked && (
+          <footer
+            className="flex flex-wrap items-center justify-center gap-x-1.5 gap-y-1 px-6 py-5 text-center"
+            style={{ borderTop: '1px solid #eaddc5', background: '#faf3e6' }}
+          >
+            <span style={{ fontFamily: FONT_DISPLAY, fontSize: 14, color: C.ink }}>SliceMatic</span>
+            <span style={{ fontSize: 12.5, color: C.brown2, fontWeight: 600 }}>
+              · owner console — something acting up or a question? We&apos;re on it:
+            </span>
+            <a href="mailto:reachus@slicematic.in" style={{ fontSize: 12.5, color: C.red, fontWeight: 700 }}>
+              reachus@slicematic.in
+            </a>
+          </footer>
+        )}
       </div>
     </div>
   )
