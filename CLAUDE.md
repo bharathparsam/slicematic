@@ -9,9 +9,12 @@ A React + Python/PostgreSQL app replacing a pizza shop's Google Form ordering sy
 business in Delhi. Built as a classroom/FDE project and demoed live.
 
 It started as a front-end-only MVP (state in React, orders in `localStorage`) and
-has since grown a **real backend**: a FastAPI service over PostgreSQL. The React
-app now persists orders through that API — `localStorage` is gone. A later stage
-adds an AI "COO" insights feature (the schema already carries the columns for it).
+has grown into a small **restaurant operations system**: a FastAPI service over
+PostgreSQL with four surfaces — **Order desk · Kitchen · Manager · Admin** — plus a
+built **AI "COO"** layer (a daily brief + a natural-language → SQL analytics chat).
+`localStorage` is gone; orders persist through the API and are also appended to a
+flat-text `orders_log.txt`. Admin adds: analytics dashboard, menu availability
+(sold-out toggles), table management, and staff/kitchen ops.
 
 ## Tech stack
 
@@ -23,11 +26,14 @@ adds an AI "COO" insights feature (the schema already carries the columns for it
   hand-built in shadcn's style (not the CLI) to keep the app dependency-light and
   offline-reproducible. Match that style if you add primitives.
 - **Vitest** for unit tests over the pure `lib/` logic
-- No router — two views (`Order` / `Admin`) via a state toggle in `App.jsx`.
+- No router — four views (`Order` / `Kitchen` / `Manager` / `Admin`) via a state
+  toggle in `App.jsx` + a shared `ViewNav`.
 
 **Backend** (`backend/`)
 - **FastAPI** + **psycopg2** (Python 3.11+), Pydantic models for request/response
 - **PostgreSQL 14+** (Supabase-ready); schema in `sql/schema.sql`
+- **AI COO** in `backend/ai/` — a **LangGraph** pipeline calling **OpenRouter**
+  (default `google/gemini-2.5-flash`) for the daily brief + guarded NL→SQL chat.
 
 ## Commands
 
@@ -35,11 +41,21 @@ adds an AI "COO" insights feature (the schema already carries the columns for it
 npm install        # once (frontend deps)
 npm run dev        # Vite dev server → http://localhost:5173
 npm run build      # production build (must stay green)
-npm test           # vitest run — pure lib/ logic (37 tests)
+npm test           # vitest run — pure lib/ logic (59 tests)
 
 npm run api:setup  # once — create backend/.venv + install Python deps
 npm run api        # start FastAPI → http://localhost:8000 (docs at /docs)
+npm run api:test   # backend pytest suite
+
+npm run seed:demo -- --reset --orders 80 --days 14   # seed demo orders + kitchen flow
 ```
+
+> **After a branch switch that changed `backend/requirements.txt`, re-run
+> `npm run api:setup`** (or `pip install -r backend/requirements.txt`) — the AI
+> deps (`openrouter`, `langgraph`, `sqlparse`) live there.
+>
+> To rebuild the flat-text log from the DB:
+> `cd backend && ./.venv/bin/python -c "from order_log import rebuild_from_db; rebuild_from_db()"`
 
 Full stack = two terminals (`npm run api` + `npm run dev`). In dev, Vite proxies
 `/api` → `http://localhost:8000` (see `vite.config.js`), so no CORS setup is needed
@@ -70,35 +86,53 @@ core intact is what makes the flow explainable line-by-line in a live Q&A.
 
 ```
 src/
-  lib/
-    menuLoader.js     # fetch + DEFENSIVE parse of the 3 .txt files. Never hardcode menu items.
+  lib/                # pure logic + API "store" seams (the ONLY place that fetches)
+    menuLoader.js     # DEFENSIVE parse of the 3 .txt files. Never hardcode menu items.
     validators.js     # validateName / validatePhone / validateQuantity → {valid, error}
     billing.js        # unitPrice → subtotal → discount → gst → finalTotal + computeOrderBill (all pure)
-    taxConfig.js      # loads GST + discount rates from /config/tax_config.json (defensive, self-defaulting)
-    tablesLoader.js   # loads the floor layout from /config/tables.json (defensive, self-defaulting)
-    orderStore.js     # API seam for orders (create/list/update/cancel/complete + occupancy). THE ONLY file that fetches orders.
-    tableStore.js     # API seam for dine-in tables (list/create + label merge/sort helpers)
-    analyticsStore.js # READ-ONLY API seam for the 4 admin analytics endpoints
-    utils.js          # cn() classname helper
+    taxConfig.js      # GST + discount rates from /config/tax_config.json (defensive, self-defaulting)
+    tablesLoader.js   # floor layout from /config/tables.json ; opsConfig.js # /config/ops_config.json
+    orderStore.js     # orders seam (create/list/update/cancel/complete/rate + occupancy)
+    tableStore.js     # tables seam (list/create/block/remove + mergeTablesWithState)
+    menuStore.js      # menu-availability seam (sold-out per pizza/base/topping id)
+    analyticsStore.js # READ-ONLY analytics seam (summary, sales_daily/range, top_products, …)
+    cooStore.js       # AI seam — daily brief (get/generate) + Ask-COO chat
+    kitchenStore.js   # kitchen queue + item transitions ; staffStore.js/adminStaffStore.js # staff
+    suggestionStore.js# "Suggestion Bhayya" upsell picks ; analyticsFormat/Definitions.js # KPI formatting
+    supabaseClient.js # supabase-js client ; auth.js # sign-in seam (admin) ; utils.js # cn()
   components/
-    TableSelect · CustomerIntakeForm · MenuSelector · OrderSummary · PaymentSelector
-    AdminOrdersTable · AdminAnalytics
+    order/            # customer flow: OrderScreen, CustomizeSheet, CartSheet, ReviewModal,
+                      #   DoneScreen, RateOrderSheet, SuggestionBhayya, PizzaLoader, BottomSheet
+    TableSelect · ViewNav · StoreHoursBadge
+    EmployeeBoard (Kitchen) · ManagerBoard · ManagerOrdersPanel · StaffLoginGate
+    AdminOrdersTable (shell + Orders + pagination) · AdminAnalytics · AdminMenu · AdminTables · AdminStaff
+    CooBriefing · CooChat · analytics/{AnalyticsCategoryStack,AnalyticsDetailCard}
     ui/primitives.jsx # shadcn-styled Button/Input/Card/Table/Label/FieldError
-  App.jsx             # orchestrates the whole flow, the table→order stage, modify round-trip, tab toggle
+  App.jsx             # orchestrates the flow, table→order stage, modify round-trip, 4-view toggle
 backend/
-  main.py             # FastAPI app + routes (thin; try/except → HTTP status mapping)
-  models.py           # Pydantic request/response schemas (also validates name/phone/table)
-  queries.py          # ALL SQL + the billing recompute. Raises typed errors main.py maps to 404/409/503.
+  main.py             # FastAPI app + thin routes (try/except → HTTP status mapping)
+  models.py           # Pydantic request/response schemas (also validates name/phone/table/staff)
+  queries.py          # ALL SQL + Decimal billing recompute + ensure_reporting_fresh(). Typed errors.
   db.py               # psycopg2 connection + db_cursor() context manager (commit/rollback)
-sql/schema.sql        # full Postgres schema: OLTP tables, status lookup, seeds, reporting materialized views
+  order_log.py        # append/rebuild the flat-text orders_log.txt (best-effort)
+  kitchen.py          # item-status queue + transitions + roll-up ; suggestions.py # upsell engine
+  analytics_summary.py# the 4-category ops dashboard payload (all pure SQL, no LLM)
+  ai/
+    chat_graph.py     # LangGraph NL→SQL→answer pipeline (with retry)
+    sql_guard.py      # SELECT-only allowlist + store_id inject + LIMIT + reject writes/secrets
+    briefing.py       # daily brief: KPI snapshot → LLM (+ deterministic fallback)
+    llm.py            # OpenRouter client ; prompts/{coo_chat,coo_answer,coo_brief}.md
+sql/schema.sql        # full Postgres schema: OLTP tables, kitchen/AI tables, seeds, reporting MVs
 ```
 
 ### The seams to respect
-- **`orderStore.js` / `tableStore.js` / `analyticsStore.js` are the persistence
-  seams.** Components must NEVER call `fetch` directly — go through these modules.
-  Each exposes async functions returning `{ ok, ... }` results or safe empty
-  fallbacks. `orderStore` maps between the UI order shape and the API JSON
-  (`toCreatePayload` / `mapApiOrder`).
+- **The `*Store.js` modules are the persistence seams** — `orderStore`, `tableStore`,
+  `menuStore`, `analyticsStore`, `cooStore`, `kitchenStore`, `staffStore`,
+  `adminStaffStore`, `suggestionStore`. Components must NEVER call `fetch`
+  directly — go through these. Each exposes async functions returning `{ ok, ... }`
+  results or safe empty fallbacks. `orderStore` maps UI order shape ↔ API JSON
+  (`toCreatePayload` / `mapApiOrder`). Read seams self-default (never throw into UI);
+  mutation seams return `{ ok:false, message }` on failure.
 - **`menuLoader.js` is the menu-data seam.** The three menu files are fetched from
   `public/data/*.txt` at runtime and parsed defensively. **These files get swapped
   out before grading** — the app must reflect whatever they contain. Never hardcode
@@ -107,15 +141,19 @@ sql/schema.sql        # full Postgres schema: OLTP tables, status lookup, seeds,
   pattern, both self-defaulting so a missing/broken file is non-fatal.
 
 ### Backend shape
-- `main.py` routes are thin: call a `queries.py` function, translate its typed
-  exceptions to HTTP (`OrderNotFoundError`→404, `OrderAlreadyTerminalError`→409,
-  `TableAlreadyExistsError`→409, `OperationalError`→503).
+- `main.py` routes are thin: call a `queries.py` / `kitchen.py` / `ai/` function,
+  translate typed exceptions to HTTP (`OrderNotFoundError`→404,
+  `OrderAlreadyTerminalError`/`TableAlreadyExistsError`/`TableInUseError`→409,
+  `StaffNotFoundError`/`InvalidTransitionError`→404/409, `OperationalError`→503,
+  `LLMError`→502/503, `ValueError`→422). Helpers `_db_unavailable` / `_llm_error`.
 - `queries.py` owns every SQL statement and the Decimal money math (`round2`,
-  `ROUND_HALF_UP`). It also ensures the singleton store, upserts the customer by
-  phone, allocates the daily `order_code` (`SM-0001`), and manages table sessions.
-- The DB is far richer than the MVP uses (multi-outlet, staff, promotions,
-  feedback, materialized views) — it's built to grow. The API touches only the
-  subset the app needs today.
+  `ROUND_HALF_UP`). It ensures the singleton store, upserts the customer by phone,
+  allocates the **daily** `order_code` (`SM-0001`), manages table sessions, and
+  exposes `ensure_reporting_fresh()` (throttled MV refresh — see AI notes).
+- `analytics_summary.py` builds the dashboard payload from **live base tables**
+  (always fresh). `ai/` reads the **`mv_*` materialized views** (must be refreshed).
+- The DB is richer than the app strictly needs (multi-outlet, promotions, feedback,
+  many MVs) — built to grow; the API touches the subset in use today.
 
 ## Domain rules (do not silently change these)
 
@@ -139,7 +177,29 @@ sql/schema.sql        # full Postgres schema: OLTP tables, status lookup, seeds,
   table (closes its session) once no open orders remain on it.
 - **Tables.** An order is placed against a table. A table with an open (active)
   order is blocked in the picker until it's completed/cancelled. Tables come from
-  `public/config/tables.json` merged with any added live via `POST /api/new_table`.
+  `public/config/tables.json` merged with `GET /api/tables` (`mergeTablesWithState`).
+  Admin (**Tables** tab) can **add / remove / reserve** tables: `store_tables.is_active`
+  (removed) and `is_blocked` (reserved). A **reserved** table shows a "Reserved" badge
+  and a sweet funny nudge on the order desk; a **seated** table can't be removed.
+- **Kitchen (item-level).** Each `order_items` row has its own status
+  (`queued→assigned→preparing→ready→served`/`cancelled`) with timestamps + an
+  append-only `order_item_status_events` log. The **Kitchen** board (`EmployeeBoard`)
+  transitions items; the **order** status is a **roll-up** of its items (never set
+  by employees directly). Powers prep-time + cancellation-stage analytics.
+- **Staff.** `staff` table with a 4-digit `pin`. Kitchen/Manager views gate on a
+  PIN picker (`StaffLoginGate` → `/api/staff/verify`); Admin manages staff. Every
+  item transition logs `actor_staff_id`. (Distinct from Supabase admin auth.)
+- **Menu availability (sold-out).** `menu_availability` keys a sold-out flag by the
+  **`.txt` line id** (`P1`/`B1`/`T1`) + type — data-not-code, so it survives a menu
+  swap. Admin (**Alter Menu** tab) toggles pizzas/bases/toppings; sold-out items are
+  greyed + unselectable on the order desk. Seam: `menuStore.js`.
+- **Guest ratings.** One 1–5 rating per order (`order_feedback`, `POST /api/rate_order`,
+  `RateOrderSheet`). Surfaced in analytics + answerable by the COO chat.
+- **Order codes.** `SM-0001` **resets daily per store** — constraint is
+  `unique(store_id, business_date, order_code)`. Do NOT make `order_code` globally
+  unique (day-2's SM-0001 would collide — this caused a prod outage; fixed).
+- **Flat-text log.** Every placed order is also appended to `orders_log.txt`
+  (`order_log.py`, best-effort) in addition to Postgres; DB stays the source of truth.
 - **Validation** (enforced in BOTH `src/lib/validators.js` and `backend/models.py`):
   name = letters + spaces only, 2–40 chars; phone = exactly 10 digits starting
   6/7/8/9; quantity = integer 1–10 (frontend). Keep the two sides in agreement.
@@ -171,6 +231,31 @@ sql/schema.sql        # full Postgres schema: OLTP tables, status lookup, seeds,
   > the value at order time (snapshotted), which is the intended behaviour.
 - **Floor layout** loads from `public/config/tables.json` (`{count,label}` or an
   explicit `{tables:[...]}`), capped at 60, self-defaulting to 12 tables.
+- **Ops + suggestions** also load from `public/config/ops_config.json`
+  (prep SLA, poll interval) and `public/config/suggestion_config.json` — same
+  data-not-code, self-defaulting pattern via `opsConfig.js` / `suggestionStore.js`.
+
+## AI COO (`backend/ai/`) — decision support only
+
+AI is used in **one place: interpretation**, never billing/discount/GST (those stay
+deterministic). Two features, both via **OpenRouter** (default
+`google/gemini-2.5-flash`; override with `OPENROUTER_MODEL` / `COO_BRIEF_MODEL` /
+`COO_CHAT_MODEL`). Key is **server-side only** in `backend/.env`.
+
+- **Daily COO Brief** (`briefing.py`, `CooBriefing`) — 3 sections (went well / didn't /
+  to do) from a KPI snapshot; stored in `ai_briefings`. **Fallback:** deterministic
+  bullets from the same JSON if the LLM is down.
+- **Ask COO** (`chat_graph.py`, `CooChat`) — NL→SQL: LLM writes one `SELECT` →
+  `sql_guard.py` (SELECT-only, allowlisted tables, `store_id` injected, `LIMIT`,
+  reject writes/secrets) → read-only query → LLM phrases the answer. Never invents
+  numbers. Prompts live in `ai/prompts/*.md` (version-controlled).
+
+**Gotcha — MV freshness:** the chat reads `mv_*` materialized views (snapshots).
+`run_chat` calls `ensure_reporting_fresh()` (throttled `refresh_reporting()`) so the
+chat reflects live data — otherwise a correct query returns 0 rows → "no data". The
+dashboard (`analytics_summary.py`) reads live base tables and needs no refresh.
+
+**If the AI is unavailable the whole app still works** — this is a hard requirement.
 
 ## Defensive parsing (never crash)
 
@@ -209,5 +294,11 @@ If you change validation, billing, or the store, update
   (match existing files). Import via the `@/` alias (→ `src/`).
 - **Backend:** Python, 4-space indent, single quotes, typed function signatures,
   Pydantic models for all request/response bodies. SQL lives only in `queries.py`.
-- Secrets live in `backend/.env` (gitignored). Never commit real `DATABASE_URL`s.
-- Don't commit `node_modules/`, `dist/`, `.next/`, or `backend/.venv/` (see `.gitignore`).
+- Secrets live in `backend/.env` (gitignored) — `DATABASE_URL`, `OPENROUTER_API_KEY`.
+  Never commit real values. Prod `OPENROUTER_API_KEY` must be set in the host env
+  (e.g. Render) separately — it's not read from the repo.
+- Don't commit `node_modules/`, `dist/`, `.next/`, `backend/.venv/`, or the runtime
+  `orders_log.txt` (see `.gitignore`).
+- **Menu/prices/counts are never hardcoded** — verified by swapping the `.txt`
+  files (incl. gibberish): the app reflects them and shows a Retry error on a fully
+  broken file. Keep it that way.
