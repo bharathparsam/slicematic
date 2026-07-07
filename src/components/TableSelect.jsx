@@ -104,6 +104,7 @@ export default function TableSelect({
   const occupiedSet = new Set(occupied)
   const blockedSet = new Set(blocked)
   const [reserved, setReserved] = useState(null) // { name, note }
+  const [reorderNote, setReorderNote] = useState(false) // "call the waiter" nudge on an occupied table
   const [opsConfig, setOpsConfig] = useState(DEFAULT_OPS_CONFIG)
   const reduce = useReducedMotion()
 
@@ -116,6 +117,7 @@ export default function TableSelect({
   const featured = (menu?.pizzas ?? []).slice(0, 3)
 
   function handleTap(name) {
+    setReorderNote(false)
     if (blockedSet.has(name) && !occupiedSet.has(name)) {
       setReserved({ name, note: RESERVED_NOTES[Math.floor(Math.random() * RESERVED_NOTES.length)] })
       return
@@ -526,49 +528,87 @@ export default function TableSelect({
           {selected ? (
             <motion.div
               key="go"
-              className="relative flex flex-col gap-2 rounded-2xl py-3 pl-[18px] pr-3 sm:flex-row sm:items-center sm:justify-between"
+              className="relative flex flex-col gap-2 rounded-2xl py-3 pl-[18px] pr-3"
               style={{ background: C.ink, color: C.cream, boxShadow: '0 14px 34px rgba(0,0,0,0.3)' }}
               initial={reduce ? { opacity: 0 } : { opacity: 0, y: 16 }}
               animate={{ opacity: 1, y: 0 }}
               exit={reduce ? { opacity: 0 } : { opacity: 0, y: 16 }}
               transition={{ type: 'spring', stiffness: 400, damping: 30 }}
             >
-              <span style={{ fontSize: 14, fontWeight: 600 }}>
-                {label}{' '}
-                <b style={{ fontFamily: FONT_DISPLAY, fontSize: 18 }}>{shortName(selected, label)}</b>{' '}
-                selected
-                {activeOrder?.rating ? (
-                  <span className="ml-1 text-xs font-semibold" style={{ color: '#f0c987' }}>
-                    · rated {activeOrder.rating}/5
-                  </span>
-                ) : null}
-              </span>
-              <div className="flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  onClick={onStart}
-                  disabled={!canStart}
-                  className="rounded-xl px-4 py-2.5 font-bold disabled:cursor-not-allowed disabled:opacity-40"
-                  style={{
-                    background: canStart ? C.red : 'rgba(255,255,255,0.12)',
-                    color: C.cream,
-                    fontSize: 14,
-                    border: canStart ? 'none' : '1px solid rgba(255,255,255,0.2)',
-                  }}
-                >
-                  Start ordering →
-                </button>
-                {canRate ? (
-                  <button
-                    type="button"
-                    onClick={() => onRate?.()}
-                    className="rounded-xl px-4 py-2.5 font-bold"
-                    style={{ background: '#fff', color: C.ink, fontSize: 14 }}
-                  >
-                    Rate order ★
-                  </button>
-                ) : null}
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <span style={{ fontSize: 14, fontWeight: 600 }}>
+                  {label}{' '}
+                  <b style={{ fontFamily: FONT_DISPLAY, fontSize: 18 }}>{shortName(selected, label)}</b>{' '}
+                  selected
+                  {activeOrder?.rating ? (
+                    <span className="ml-1 text-xs font-semibold" style={{ color: '#f0c987' }}>
+                      · rated {activeOrder.rating}/5
+                    </span>
+                  ) : null}
+                </span>
+                <div className="flex flex-wrap gap-2">
+                  {canStart ? (
+                    <button
+                      type="button"
+                      onClick={onStart}
+                      className="rounded-xl px-4 py-2.5 font-bold transition-transform active:scale-[0.98]"
+                      style={{ background: C.red, color: C.cream, fontSize: 14 }}
+                    >
+                      Start ordering →
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setReorderNote((v) => !v)}
+                      aria-expanded={reorderNote}
+                      className="rounded-xl px-4 py-2.5 font-bold transition-colors"
+                      style={{
+                        background: reorderNote ? 'rgba(255,255,255,0.2)' : 'rgba(255,255,255,0.12)',
+                        color: C.cream,
+                        fontSize: 14,
+                        border: '1px solid rgba(255,255,255,0.22)',
+                      }}
+                    >
+                      Want to order more?
+                    </button>
+                  )}
+                  {canRate ? (
+                    <button
+                      type="button"
+                      onClick={() => onRate?.()}
+                      className="rounded-xl px-4 py-2.5 font-bold"
+                      style={{ background: '#fff', color: C.ink, fontSize: 14 }}
+                    >
+                      Rate order ★
+                    </button>
+                  ) : null}
+                </div>
               </div>
+
+              {/* Honest, subtle "call the waiter" nudge (no self-serve re-order yet) */}
+              <AnimatePresence initial={false}>
+                {reorderNote && !canStart && (
+                  <motion.div
+                    key="reorder-note"
+                    initial={reduce ? { opacity: 0 } : { opacity: 0, height: 0, y: -4 }}
+                    animate={{ opacity: 1, height: 'auto', y: 0 }}
+                    exit={reduce ? { opacity: 0 } : { opacity: 0, height: 0, y: -4 }}
+                    transition={{ type: 'spring', stiffness: 420, damping: 34 }}
+                    className="overflow-hidden"
+                  >
+                    <div
+                      className="mt-1 flex items-start gap-2.5 rounded-xl px-3.5 py-2.5"
+                      style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)' }}
+                    >
+                      <span aria-hidden="true" style={{ fontSize: 15, lineHeight: 1.4 }}>🙌</span>
+                      <span style={{ fontSize: 12.5, lineHeight: 1.55, color: '#eaddc5' }}>
+                        We&apos;ll be honest — adding to an open order isn&apos;t self&#8209;serve just yet.
+                        Give your waiter a little wave and they&apos;ll pop over and add it for you right away. 🍕
+                      </span>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </motion.div>
           ) : (
             <motion.p

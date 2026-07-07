@@ -287,7 +287,7 @@ export default function OrderScreen({
                 <div style={{ fontSize: 15, fontWeight: 800, color: C.ink, lineHeight: 1.15 }}>{p.name}</div>
                 <div className="mt-1.5 flex items-center justify-between">
                   <span style={{ fontSize: 12.5, color: C.brown2, fontWeight: 600 }}>
-                    {isSold ? 'Unavailable' : `from ${formatCurrency(p.price + minBasePrice)}`}
+                    {isSold ? 'Snapped up! 😋' : `from ${formatCurrency(p.price + minBasePrice)}`}
                   </span>
                   <span
                     className="flex h-[26px] w-[26px] items-center justify-center rounded-lg leading-none"
