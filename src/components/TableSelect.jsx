@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { motion, AnimatePresence, useReducedMotion } from 'framer-motion'
 import { formatCurrency } from '@/lib/billing'
+import { pizzaImage } from '@/lib/pizzaImages'
 import { loadOpsConfig, DEFAULT_OPS_CONFIG } from '@/lib/opsConfig'
 import ViewNav from '@/components/ViewNav'
 // import StoreHoursBadge from '@/components/StoreHoursBadge' // hidden for now (kept)
@@ -323,14 +324,23 @@ export default function TableSelect({
                   }}
                 >
                   <div
-                    className="flex h-24 w-24 flex-none items-center justify-center rounded-[13px] text-4xl"
+                    className="relative flex h-24 w-24 flex-none items-center justify-center overflow-hidden rounded-[13px] text-4xl"
                     style={{
                       background:
                         'repeating-linear-gradient(135deg,#efdcc0,#efdcc0 9px,#e9d3b2 9px,#e9d3b2 18px)',
                     }}
                     aria-hidden="true"
                   >
-                    🍕
+                    {pizzaImage(p.name) ? (
+                      <img
+                        src={pizzaImage(p.name)}
+                        alt=""
+                        loading="lazy"
+                        className="absolute inset-0 h-full w-full object-cover"
+                      />
+                    ) : (
+                      '🍕'
+                    )}
                   </div>
                   <div className="flex min-w-0 flex-1 flex-col justify-center">
                     <div className="mb-1.5">

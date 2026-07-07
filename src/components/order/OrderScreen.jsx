@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { formatCurrency } from '@/lib/billing'
+import { pizzaImage } from '@/lib/pizzaImages'
 import {
   DEFAULT_SUGGESTION_CONFIG,
   dismissSuggestion,
@@ -261,7 +262,16 @@ export default function OrderScreen({
                   }}
                   aria-hidden="true"
                 >
-                  🍕
+                  {pizzaImage(p.name) ? (
+                    <img
+                      src={pizzaImage(p.name)}
+                      alt=""
+                      loading="lazy"
+                      className="absolute inset-0 h-full w-full object-cover"
+                    />
+                  ) : (
+                    '🍕'
+                  )}
                   {isSold ? (
                     <span
                       className="absolute inset-x-0 bottom-0 py-1 text-center uppercase"
